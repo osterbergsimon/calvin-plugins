@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "id": "test_plugin",
+      "name": "Test Plugin",
+      "path": "test-plugin",
+      "description": "A basic test plugin for plugin installation testing",
+      "version": "1.0.0",
+      "type": "service"
+    }
+  ]
+}
+
