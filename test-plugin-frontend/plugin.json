@@ -1,0 +1,22 @@
+{
+  "format_version": "1.0.0",
+  "id": "test_plugin_frontend",
+  "name": "Test Plugin with Frontend",
+  "version": "1.0.0",
+  "type": "service",
+  "description": "A test plugin with frontend components for testing frontend installation",
+  "author": "Calvin Test Suite",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["test", "example", "service", "frontend"],
+  "dependencies": {
+    "python": ">=3.10",
+    "calvin": ">=1.0.0"
+  },
+  "requirements": {
+    "restart_required": true,
+    "config_required": false
+  }
+}
+

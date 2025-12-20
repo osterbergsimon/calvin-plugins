@@ -8,6 +8,14 @@
       "description": "A basic test plugin for plugin installation testing",
       "version": "1.0.0",
       "type": "service"
+    },
+    {
+      "id": "test_plugin_frontend",
+      "name": "Test Plugin with Frontend",
+      "path": "test-plugin-frontend",
+      "description": "A test plugin with frontend components for testing frontend installation",
+      "version": "1.0.0",
+      "type": "service"
     }
   ]
 }
