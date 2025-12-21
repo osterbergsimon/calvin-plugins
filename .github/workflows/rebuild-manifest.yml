@@ -1,0 +1,52 @@
+name: Rebuild Manifest
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/plugin.json'
+      - '**/theme.json'
+      - '**/plugin.py'
+      - 'scripts/rebuild-manifest.py'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  rebuild-manifest:
+    name: Rebuild plugins.json Manifest
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      
+      - name: Rebuild manifest
+        run: python3 scripts/rebuild-manifest.py
+      
+      - name: Check for changes
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain plugins.json)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manifest was updated"
+            git diff plugins.json
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Manifest is up to date"
+          fi
+      
+      - name: Commit changes
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add plugins.json
+          git commit -m "chore: rebuild plugins.json manifest [skip ci]" || exit 0
+          git push || echo "No changes to push or push failed"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

@@ -25,12 +25,15 @@ This repository contains plugins for the Calvin dashboard system.
 
 ```
 calvin-plugins/
-├── plugins.json          # Repository manifest (lists all plugins)
+├── plugins.json          # Repository manifest (lists all plugins and themes)
 ├── plugin1/              # Plugin directory
 │   ├── plugin.json       # Plugin manifest (required)
 │   ├── plugin.py         # Plugin implementation (required)
 │   ├── frontend/         # Frontend components (optional)
 │   └── assets/           # Static assets (optional)
+├── theme1/               # Theme directory
+│   ├── theme.json        # Theme manifest (required)
+│   └── preview.png       # Preview image (optional)
 └── plugin2/
     ├── plugin.json
     └── plugin.py
@@ -41,6 +44,9 @@ calvin-plugins/
 Each plugin **must** have:
 - `plugin.json` - Plugin manifest with metadata, dependencies, and requirements
 - `plugin.py` - Plugin implementation
+
+Each theme **must** have:
+- `theme.json` - Theme manifest with CSS variables and metadata
 
 ### Plugin Manifest (`plugin.json`)
 
@@ -66,7 +72,7 @@ See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugi
 
 ### Repository Manifest (`plugins.json`)
 
-If this repository contains multiple plugins, include a `plugins.json` at the root:
+If this repository contains multiple plugins or themes, include a `plugins.json` at the root:
 
 ```json
 {
@@ -80,8 +86,25 @@ If this repository contains multiple plugins, include a `plugins.json` at the ro
       "type": "service",
       "description": "Plugin description"
     }
+  ],
+  "themes": [
+    {
+      "id": "theme1",
+      "name": "Theme 1",
+      "path": "theme1",
+      "version": "1.0.0",
+      "description": "Theme description"
+    }
   ]
 }
+```
+
+**Note**: The `themes` array is optional and only included if themes are present in the repository.
+
+The manifest is automatically rebuilt by CI when plugins or themes are added/modified. You can also rebuild it manually:
+
+```bash
+python3 scripts/rebuild-manifest.py
 ```
 
 ## Creating a New Plugin
@@ -90,12 +113,12 @@ If this repository contains multiple plugins, include a `plugins.json` at the ro
 
 Quick checklist:
 1. ✅ Read [CREATING_PLUGINS.md](./CREATING_PLUGINS.md)
-2. ✅ Create plugin directory (e.g., `my-plugin/`)
-3. ✅ Add `plugin.json` with required fields (include `format_version: "1.0.0"`)
-4. ✅ Add `plugin.py` with plugin implementation
+2. ✅ Create plugin/theme directory (e.g., `my-plugin/` or `my-theme/`)
+3. ✅ Add `plugin.json` or `theme.json` with required fields
+4. ✅ For plugins: Add `plugin.py` with plugin implementation
 5. ✅ Optionally add `frontend/` and `assets/` directories
-6. ✅ Test your plugin locally
-7. ✅ Update `plugins.json` to include your plugin
+6. ✅ Test your plugin/theme locally
+7. ✅ Run `python3 scripts/rebuild-manifest.py` to update `plugins.json` (or let CI do it)
 8. ✅ Submit a pull request
 
 ## Plugin Format Version

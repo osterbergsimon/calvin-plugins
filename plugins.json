@@ -2,6 +2,22 @@
   "version": "1.0.0",
   "plugins": [
     {
+      "id": "mealie",
+      "name": "Mealie Meal Plan",
+      "path": "mealie",
+      "description": "Display weekly meal plan from Mealie recipe manager",
+      "version": "1.0.0",
+      "type": "service"
+    },
+    {
+      "id": "picsum",
+      "name": "Picsum Photos",
+      "path": "picsum",
+      "description": "Random high-quality images from Picsum Photos (no API key required)",
+      "version": "1.0.0",
+      "type": "image"
+    },
+    {
       "id": "test_plugin",
       "name": "Test Plugin",
       "path": "test-plugin",
@@ -18,29 +34,21 @@
       "type": "service"
     },
     {
-      "id": "picsum",
-      "name": "Picsum Photos",
-      "path": "picsum",
-      "description": "Random high-quality images from Picsum Photos (no API key required)",
-      "version": "1.0.0",
-      "type": "image"
-    },
-    {
       "id": "unsplash",
       "name": "Unsplash",
       "path": "unsplash",
       "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
       "version": "1.0.0",
       "type": "image"
-    },
+    }
+  ],
+  "themes": [
     {
-      "id": "mealie",
-      "name": "Mealie Meal Plan",
-      "path": "mealie",
-      "description": "Display weekly meal plan from Mealie recipe manager",
-      "version": "1.0.0",
-      "type": "service"
+      "id": "midnight",
+      "name": "Midnight",
+      "path": "midnight-theme",
+      "description": "A deep midnight theme with purple and blue accents",
+      "version": "1.0.0"
     }
   ]
 }
-
