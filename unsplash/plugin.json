@@ -1,0 +1,33 @@
+{
+  "format_version": "1.0.0",
+  "id": "unsplash",
+  "name": "Unsplash",
+  "version": "1.0.0",
+  "type": "image",
+  "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["image", "photos", "unsplash", "api"],
+  "dependencies": {
+    "python": ">=3.10",
+    "calvin": ">=1.0.0"
+  },
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
+  },
+  "requirements": {
+    "restart_required": true,
+    "config_required": true
+  }
+}
+
