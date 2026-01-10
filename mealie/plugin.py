@@ -1143,3 +1143,6 @@ async def handle_plugin_config_update(
             logger.warning(f"[Mealie] Plugin instance {mealie_instance.id} not found in manager")
             return {"instance_updated": False, "error": "Plugin instance not found"}
 
+
+
+

@@ -2,6 +2,14 @@
   "version": "1.0.0",
   "plugins": [
     {
+      "id": "imap",
+      "name": "Email (IMAP)",
+      "path": "imap",
+      "description": "Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share \u2192 Email.",
+      "version": "1.0.0",
+      "type": "backend"
+    },
+    {
       "id": "mealie",
       "name": "Mealie Meal Plan",
       "path": "mealie",
