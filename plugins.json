@@ -10,6 +10,14 @@
       "type": "backend"
     },
     {
+      "id": "image-processor",
+      "name": "Image Processor",
+      "path": "image-processor",
+      "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
+      "version": "1.0.0",
+      "type": "backend"
+    },
+    {
       "id": "mealie",
       "name": "Mealie Meal Plan",
       "path": "mealie",

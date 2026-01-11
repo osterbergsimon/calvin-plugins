@@ -1,0 +1,32 @@
+{
+  "format_version": "1.0.0",
+  "id": "image-processor",
+  "name": "Image Processor",
+  "version": "1.0.0",
+  "type": "backend",
+  "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["image", "processor", "events", "backend", "example"],
+  "dependencies": {
+    "python": ">=3.10",
+    "calvin": ">=1.0.0"
+  },
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
+  },
+  "requirements": {
+    "restart_required": false,
+    "config_required": false
+  }
+}
