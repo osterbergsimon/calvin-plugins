@@ -756,22 +756,46 @@ async def handle_plugin_config_update(
     logger = logging.getLogger(__name__)
 
     # Extract metadata fields before processing config
+    # These fields are used to determine if we're creating a new instance or updating an existing one
     specific_instance_id = config.get("_instance_id")
     instance_name = config.get("_instance_name", "")
     instance_enabled_flag = config.get("_instance_enabled")
+    
+    # Log instance creation metadata for debugging
+    logger.info(
+        f"[IMAP] Config update - instance_name: {instance_name}, "
+        f"specific_instance_id: {specific_instance_id}, "
+        f"instance_enabled: {instance_enabled_flag}"
+    )
     
     # Remove metadata fields from config before processing (they're not part of the actual config)
     config = {k: v for k, v in config.items() if not k.startswith("_instance_")}
 
     # Check if we have required config (email and password)
+    # Handle both dict (schema object) and string values
     email_address = config.get("email_address", "")
+    if isinstance(email_address, dict):
+        email_address = email_address.get("value") or email_address.get("default") or ""
+    email_address = str(email_address).strip() if email_address else ""
+    
     email_password = config.get("email_password", "")
+    if isinstance(email_password, dict):
+        email_password = email_password.get("value") or email_password.get("default") or ""
+    email_password = str(email_password).strip() if email_password else ""
+    
+    # Extract imap_server for instance ID generation (not for display purposes)
+    imap_server = config.get("imap_server", "imap.gmail.com")
+    if isinstance(imap_server, dict):
+        imap_server = imap_server.get("value") or imap_server.get("default") or "imap.gmail.com"
+    imap_server = str(imap_server).strip() if imap_server else "imap.gmail.com"
 
     if not email_address or not email_password:
         logger.info("[IMAP] Skipping instance creation - missing email or password")
         return {"instance_created": False, "instance_updated": False}
 
-    # Check if we're updating a specific instance ID
+    # Check if we're updating a specific instance ID or creating a new one
+    # If _instance_name is provided, always create a new instance (support multiple instances)
+    # Otherwise, check for existing instance (backward compatibility)
     imap_instance = None
     try:
         if specific_instance_id:
@@ -784,7 +808,8 @@ async def handle_plugin_config_update(
             imap_instance = result.scalar_one_or_none()
         elif instance_name:
             # If _instance_name is provided, this is a new instance creation request
-            # Always create a new instance (like the old ImagePlugin version)
+            # Always create a new instance - don't check for existing instances
+            # This allows multiple instances (like mealie and yr plugins)
             imap_instance = None
         else:
             # Find first IMAP instance (backward compatibility for old behavior)
@@ -802,6 +827,8 @@ async def handle_plugin_config_update(
             imap_instance = result.scalar_one_or_none()
         elif instance_name:
             # If _instance_name is provided, this is a new instance creation request
+            # Always create a new instance - don't check for existing instances
+            # This allows multiple instances (like mealie and yr plugins)
             imap_instance = None
         else:
             result = session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
@@ -809,15 +836,11 @@ async def handle_plugin_config_update(
 
     if not imap_instance:
         # Create new IMAP instance
-        # Generate unique instance ID based on name and email, or use timestamp as fallback
-        if instance_name:
-            # Use name + email hash for more unique ID
-            name_hash = abs(hash(instance_name)) % 10000
-            email_hash = abs(hash(email_address)) % 10000
-            plugin_instance_id = f"imap-{name_hash}-{email_hash}"
-        else:
-            # Fallback to email-based ID (backward compatibility)
-            plugin_instance_id = f"imap-{abs(hash(email_address)) % 10000}"
+        # Generate unique instance ID based on email address and server (not display name)
+        # Display name is only for user display purposes and can change
+        email_hash = abs(hash(email_address)) % 10000
+        server_hash = abs(hash(imap_server)) % 10000
+        plugin_instance_id = f"imap-{email_hash}-{server_hash}"
         
         # Ensure uniqueness by checking if ID already exists
         try:
@@ -842,20 +865,258 @@ async def handle_plugin_config_update(
         # Use provided instance name or default
         display_name = instance_name if instance_name else f"IMAP Email ({email_address})"
         
+        # Ensure plugin type exists in PluginTypeDB before creating instance
+        # (register_plugin needs this to set the correct plugin_type)
+        if not db_type:
+            from app.models.db_models import PluginTypeDB
+            from app.plugins.base import PluginType
+            
+            try:
+                # Try to get plugin type info from pluggy hooks
+                from app.plugins.loader import plugin_loader
+                plugin_types = plugin_loader.get_plugin_types()
+                type_info = next((t for t in plugin_types if t.get("type_id") == "imap"), None)
+                
+                if type_info:
+                    plugin_type_enum = type_info.get("plugin_type")
+                    plugin_type_value = (
+                        plugin_type_enum.value
+                        if hasattr(plugin_type_enum, "value")
+                        else str(plugin_type_enum)
+                    )
+                    
+                    db_type = PluginTypeDB(
+                        type_id="imap",
+                        plugin_type=plugin_type_value,
+                        name=type_info.get("name", "Email (IMAP)"),
+                        description=type_info.get("description", ""),
+                        version=type_info.get("version"),
+                        common_config_schema=type_info.get("common_config_schema", {}),
+                        enabled=enabled if enabled is not None else True,
+                    )
+                    session.add(db_type)
+                    try:
+                        await session.commit()
+                    except TypeError:
+                        session.commit()
+                    logger.info("[IMAP] Created plugin type in database")
+            except Exception as type_error:
+                logger.warning(f"[IMAP] Error ensuring plugin type exists: {type_error}")
+        
         logger.info(f"[IMAP] Creating new instance: {plugin_instance_id} with name: {display_name}")
         try:
+            # Determine enabled status - handle string values from config
+            # Convert all potential string sources to boolean first
+            instance_enabled_flag_bool = None
+            if instance_enabled_flag is not None:
+                if isinstance(instance_enabled_flag, str):
+                    instance_enabled_flag_bool = instance_enabled_flag.lower() in ("true", "1", "yes")
+                else:
+                    instance_enabled_flag_bool = bool(instance_enabled_flag)
+            
+            enabled_bool = None
+            if enabled is not None:
+                if isinstance(enabled, str):
+                    enabled_bool = enabled.lower() in ("true", "1", "yes")
+                else:
+                    enabled_bool = bool(enabled)
+            
+            db_type_enabled_bool = None
+            if db_type and hasattr(db_type, 'enabled'):
+                if isinstance(db_type.enabled, str):
+                    db_type_enabled_bool = db_type.enabled.lower() in ("true", "1", "yes")
+                else:
+                    db_type_enabled_bool = bool(db_type.enabled)
+            
+            # Now determine the final enabled status with proper boolean values
             instance_enabled = (
-                instance_enabled_flag
-                if instance_enabled_flag is not None
-                else (enabled if enabled is not None else (db_type.enabled if db_type else True))
+                instance_enabled_flag_bool
+                if instance_enabled_flag_bool is not None
+                else (enabled_bool if enabled_bool is not None else (db_type_enabled_bool if db_type_enabled_bool is not None else True))
             )
-            plugin = await plugin_registry.register_plugin(
+            # Ensure it's a boolean (should already be, but double-check)
+            instance_enabled = bool(instance_enabled)
+            
+            # Check if instance already exists in database or plugin manager
+            # (might have been partially created from a previous failed attempt)
+            try:
+                check_result = await session.execute(
+                    select(PluginDB).where(PluginDB.id == plugin_instance_id)
+                )
+                existing_db_instance = check_result.scalar_one_or_none()
+                existing_plugin = plugin_manager.get_plugin(plugin_instance_id)
+                
+                if existing_db_instance or existing_plugin:
+                    logger.info(
+                        f"[IMAP] Instance {plugin_instance_id} already exists, "
+                        f"updating instead of creating new"
+                    )
+                    # Update existing instance
+                    if existing_db_instance:
+                        existing_db_instance.name = display_name
+                        existing_db_instance.config = config
+                        existing_db_instance.enabled = instance_enabled
+                        try:
+                            await session.commit()
+                        except TypeError:
+                            session.commit()
+                    
+                    # Update or create plugin in manager
+                    if existing_plugin:
+                        await existing_plugin.configure(config)
+                        if instance_enabled:
+                            existing_plugin.enable()
+                        else:
+                            existing_plugin.disable()
+                    else:
+                        # Create plugin instance directly using the passed session to avoid database locks
+                        from app.plugins.loader import plugin_loader
+                        
+                        # Create plugin instance using pluggy hooks
+                        plugin = plugin_loader.create_plugin_instance(
+                            plugin_id=plugin_instance_id,
+                            type_id="imap",
+                            name=display_name,
+                            config={**config, "enabled": instance_enabled},
+                        )
+                        
+                        if plugin:
+                            # Configure plugin
+                            await plugin.configure(config)
+                            
+                            # Set enabled status
+                            if instance_enabled:
+                                plugin.enable()
+                            else:
+                                plugin.disable()
+                            
+                            # Register plugin with manager
+                            await plugin_manager.register(plugin)
+                            
+                            # Initialize plugin
+                            await plugin.initialize()
+                    
+                    return {
+                        "instance_created": False,
+                        "instance_updated": True,
+                        "instance_id": plugin_instance_id,
+                    }
+            except TypeError:
+                # Fallback to sync check
+                check_result = session.execute(
+                    select(PluginDB).where(PluginDB.id == plugin_instance_id)
+                )
+                existing_db_instance = check_result.scalar_one_or_none()
+                existing_plugin = plugin_manager.get_plugin(plugin_instance_id)
+                
+                if existing_db_instance or existing_plugin:
+                    logger.info(
+                        f"[IMAP] Instance {plugin_instance_id} already exists, "
+                        f"updating instead of creating new"
+                    )
+                    if existing_db_instance:
+                        existing_db_instance.name = display_name
+                        existing_db_instance.config = config
+                        existing_db_instance.enabled = instance_enabled
+                        session.commit()
+                    
+                    if existing_plugin:
+                        await existing_plugin.configure(config)
+                        if instance_enabled:
+                            existing_plugin.enable()
+                        else:
+                            existing_plugin.disable()
+                    else:
+                        # Create plugin instance directly using the passed session to avoid database locks
+                        from app.plugins.loader import plugin_loader
+                        from app.models.db_models import PluginTypeDB, PluginDB
+                        
+                        # Create plugin instance using pluggy hooks
+                        plugin = plugin_loader.create_plugin_instance(
+                            plugin_id=plugin_instance_id,
+                            type_id="imap",
+                            name=display_name,
+                            config={**config, "enabled": instance_enabled},
+                        )
+                        
+                        if plugin:
+                            # Configure plugin
+                            await plugin.configure(config)
+                            
+                            # Set enabled status
+                            if instance_enabled:
+                                plugin.enable()
+                            else:
+                                plugin.disable()
+                            
+                            # Register plugin with manager
+                            await plugin_manager.register(plugin)
+                            
+                            # Initialize plugin
+                            await plugin.initialize()
+                    
+                    return {
+                        "instance_created": False,
+                        "instance_updated": True,
+                        "instance_id": plugin_instance_id,
+                    }
+            
+            # Create plugin instance directly using the passed session to avoid database locks
+            # Instead of calling register_plugin which creates its own session
+            from app.plugins.loader import plugin_loader
+            from app.models.db_models import PluginTypeDB, PluginDB
+            
+            # Create plugin instance using pluggy hooks
+            plugin = plugin_loader.create_plugin_instance(
                 plugin_id=plugin_instance_id,
                 type_id="imap",
                 name=display_name,
-                config=config,
-                enabled=instance_enabled,
+                config={**config, "enabled": instance_enabled},
             )
+            
+            if not plugin:
+                logger.error(f"[IMAP] Failed to create plugin instance for {plugin_instance_id}")
+                return {"instance_created": False, "error": "Failed to create plugin instance"}
+            
+            # Configure plugin
+            await plugin.configure(config)
+            
+            # Set enabled status
+            if instance_enabled:
+                plugin.enable()
+            else:
+                plugin.disable()
+            
+            # Register plugin with manager
+            await plugin_manager.register(plugin)
+            
+            # Save to database using the passed session
+            # Get plugin type to determine plugin_type
+            if not db_type:
+                result = await session.execute(
+                    select(PluginTypeDB).where(PluginTypeDB.type_id == "imap")
+                )
+                db_type = result.scalar_one_or_none()
+            
+            plugin_type = db_type.plugin_type if db_type else "backend"
+            
+            db_plugin = PluginDB(
+                id=plugin_instance_id,
+                type_id="imap",
+                plugin_type=plugin_type,
+                name=display_name,
+                enabled=instance_enabled,
+                config=config,
+            )
+            session.add(db_plugin)
+            try:
+                await session.commit()
+            except TypeError:
+                session.commit()
+            
+            # Initialize plugin
+            await plugin.initialize()
+            
             return {
                 "instance_created": True,
                 "instance_id": plugin_instance_id,
@@ -871,15 +1132,47 @@ async def handle_plugin_config_update(
             await plugin.configure(config)
             
             # Determine enabled status (prefer instance_enabled_flag, then enabled, then existing)
+            # Convert all potential string sources to boolean first
+            instance_enabled_flag_bool = None
+            if instance_enabled_flag is not None:
+                if isinstance(instance_enabled_flag, str):
+                    instance_enabled_flag_bool = instance_enabled_flag.lower() in ("true", "1", "yes")
+                else:
+                    instance_enabled_flag_bool = bool(instance_enabled_flag)
+            
+            enabled_bool = None
+            if enabled is not None:
+                if isinstance(enabled, str):
+                    enabled_bool = enabled.lower() in ("true", "1", "yes")
+                else:
+                    enabled_bool = bool(enabled)
+            
+            db_type_enabled_bool = None
+            if db_type and hasattr(db_type, 'enabled'):
+                if isinstance(db_type.enabled, str):
+                    db_type_enabled_bool = db_type.enabled.lower() in ("true", "1", "yes")
+                else:
+                    db_type_enabled_bool = bool(db_type.enabled)
+            
+            existing_enabled_bool = None
+            if imap_instance and hasattr(imap_instance, 'enabled'):
+                if isinstance(imap_instance.enabled, str):
+                    existing_enabled_bool = imap_instance.enabled.lower() in ("true", "1", "yes")
+                else:
+                    existing_enabled_bool = bool(imap_instance.enabled)
+            
+            # Now determine the final enabled status with proper boolean values
             instance_enabled = (
-                instance_enabled_flag
-                if instance_enabled_flag is not None
+                instance_enabled_flag_bool
+                if instance_enabled_flag_bool is not None
                 else (
-                    enabled
-                    if enabled is not None
-                    else (db_type.enabled if db_type else imap_instance.enabled)
+                    enabled_bool
+                    if enabled_bool is not None
+                    else (db_type_enabled_bool if db_type_enabled_bool is not None else existing_enabled_bool if existing_enabled_bool is not None else True)
                 )
             )
+            # Ensure it's a boolean (should already be, but double-check)
+            instance_enabled = bool(instance_enabled)
 
             # Update instance name if provided
             if instance_name and instance_name != imap_instance.name:
