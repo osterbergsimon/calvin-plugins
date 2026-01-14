@@ -4,6 +4,7 @@ import asyncio
 import email
 import imaplib
 import os
+import time
 from email.header import decode_header
 from pathlib import Path
 from typing import Any
@@ -754,6 +755,14 @@ async def handle_plugin_config_update(
 
     logger = logging.getLogger(__name__)
 
+    # Extract metadata fields before processing config
+    specific_instance_id = config.get("_instance_id")
+    instance_name = config.get("_instance_name", "")
+    instance_enabled_flag = config.get("_instance_enabled")
+    
+    # Remove metadata fields from config before processing (they're not part of the actual config)
+    config = {k: v for k, v in config.items() if not k.startswith("_instance_")}
+
     # Check if we have required config (email and password)
     email_address = config.get("email_address", "")
     email_password = config.get("email_password", "")
@@ -762,28 +771,88 @@ async def handle_plugin_config_update(
         logger.info("[IMAP] Skipping instance creation - missing email or password")
         return {"instance_created": False, "instance_updated": False}
 
-    # Check if IMAP instance exists
+    # Check if we're updating a specific instance ID
+    imap_instance = None
     try:
-        # Try async first
-        result = await session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
-        imap_instance = result.scalar_one_or_none()
+        if specific_instance_id:
+            # Update specific instance by ID
+            result = await session.execute(
+                select(PluginDB).where(
+                    PluginDB.id == specific_instance_id, PluginDB.type_id == "imap"
+                )
+            )
+            imap_instance = result.scalar_one_or_none()
+        elif instance_name:
+            # If _instance_name is provided, this is a new instance creation request
+            # Always create a new instance (like the old ImagePlugin version)
+            imap_instance = None
+        else:
+            # Find first IMAP instance (backward compatibility for old behavior)
+            # This matches the old ImagePlugin behavior
+            result = await session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
+            imap_instance = result.scalar_one_or_none()
     except TypeError:
         # Fallback to sync if session is not async
-        result = session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
-        imap_instance = result.scalar_one_or_none()
+        if specific_instance_id:
+            result = session.execute(
+                select(PluginDB).where(
+                    PluginDB.id == specific_instance_id, PluginDB.type_id == "imap"
+                )
+            )
+            imap_instance = result.scalar_one_or_none()
+        elif instance_name:
+            # If _instance_name is provided, this is a new instance creation request
+            imap_instance = None
+        else:
+            result = session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
+            imap_instance = result.scalar_one_or_none()
 
     if not imap_instance:
         # Create new IMAP instance
-        plugin_instance_id = f"imap-{abs(hash(email_address)) % 10000}"
-        logger.info(f"[IMAP] Creating new instance: {plugin_instance_id}")
+        # Generate unique instance ID based on name and email, or use timestamp as fallback
+        if instance_name:
+            # Use name + email hash for more unique ID
+            name_hash = abs(hash(instance_name)) % 10000
+            email_hash = abs(hash(email_address)) % 10000
+            plugin_instance_id = f"imap-{name_hash}-{email_hash}"
+        else:
+            # Fallback to email-based ID (backward compatibility)
+            plugin_instance_id = f"imap-{abs(hash(email_address)) % 10000}"
+        
+        # Ensure uniqueness by checking if ID already exists
+        try:
+            check_result = await session.execute(
+                select(PluginDB).where(PluginDB.id == plugin_instance_id)
+            )
+            existing = check_result.scalar_one_or_none()
+            if existing:
+                # Add timestamp to make it unique
+                timestamp = int(time.time() * 1000) % 100000
+                plugin_instance_id = f"{plugin_instance_id}-{timestamp}"
+        except TypeError:
+            # Fallback to sync
+            check_result = session.execute(
+                select(PluginDB).where(PluginDB.id == plugin_instance_id)
+            )
+            existing = check_result.scalar_one_or_none()
+            if existing:
+                timestamp = int(time.time() * 1000) % 100000
+                plugin_instance_id = f"{plugin_instance_id}-{timestamp}"
+        
+        # Use provided instance name or default
+        display_name = instance_name if instance_name else f"IMAP Email ({email_address})"
+        
+        logger.info(f"[IMAP] Creating new instance: {plugin_instance_id} with name: {display_name}")
         try:
             instance_enabled = (
-                enabled if enabled is not None else (db_type.enabled if db_type else True)
+                instance_enabled_flag
+                if instance_enabled_flag is not None
+                else (enabled if enabled is not None else (db_type.enabled if db_type else True))
             )
             plugin = await plugin_registry.register_plugin(
                 plugin_id=plugin_instance_id,
                 type_id="imap",
-                name="IMAP Email",
+                name=display_name,
                 config=config,
                 enabled=instance_enabled,
             )
@@ -800,11 +869,21 @@ async def handle_plugin_config_update(
         plugin = plugin_manager.get_plugin(imap_instance.id)
         if plugin:
             await plugin.configure(config)
+            
+            # Determine enabled status (prefer instance_enabled_flag, then enabled, then existing)
             instance_enabled = (
-                enabled
-                if enabled is not None
-                else (db_type.enabled if db_type else imap_instance.enabled)
+                instance_enabled_flag
+                if instance_enabled_flag is not None
+                else (
+                    enabled
+                    if enabled is not None
+                    else (db_type.enabled if db_type else imap_instance.enabled)
+                )
             )
+
+            # Update instance name if provided
+            if instance_name and instance_name != imap_instance.name:
+                imap_instance.name = instance_name
 
             if instance_enabled:
                 plugin.enable()
