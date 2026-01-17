@@ -8,6 +8,11 @@ import httpx
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.utils.config import extract_config_value, to_int, to_str
+from app.plugins.utils.instance_manager import (
+    InstanceManagerConfig,
+    handle_plugin_config_update_generic,
+)
 
 
 class UnsplashImagePlugin(ImagePlugin):
@@ -22,6 +27,7 @@ class UnsplashImagePlugin(ImagePlugin):
             "name": "Unsplash",
             "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
             "version": "1.0.0",
+            "supports_multiple_instances": False,  # Single-instance plugin
             "common_config_schema": {
                 "api_key": {
                     "type": "password",
@@ -62,6 +68,7 @@ class UnsplashImagePlugin(ImagePlugin):
                     },
                 },
             },
+            "instance_config_schema": {},  # No instance-specific settings (single-instance)
             "plugin_class": cls,
         }
 
@@ -275,24 +282,24 @@ class UnsplashImagePlugin(ImagePlugin):
             True if configuration is valid
         """
         # API key is optional, but if provided should be a string
-        if "api_key" in config and config["api_key"]:
-            if not isinstance(config["api_key"], str):
+        if "api_key" in config:
+            api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+            if api_key and not isinstance(api_key, str):
                 return False
 
         # Category should be one of the valid options
         if "category" in config:
+            category = extract_config_value(config, "category", default="popular", converter=to_str)
             valid_categories = ["popular", "latest", "oldest"]
-            if config["category"] not in valid_categories:
+            if category not in valid_categories:
                 return False
 
-        # Count should be a positive integer
+        # Count should be a positive integer between 1 and 100
         if "count" in config:
-            try:
-                count = int(config["count"])
-                if count < 1 or count > 100:  # Unsplash API limit
-                    return False
-            except (ValueError, TypeError):
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            if count < 1 or count > 100:  # Unsplash API limit
                 return False
+            # Also validate in configure method, but here we just check range
 
         return True
 
@@ -306,11 +313,16 @@ class UnsplashImagePlugin(ImagePlugin):
         await super().configure(config)
 
         if "api_key" in config:
-            self.api_key = config["api_key"]
+            api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+            # Convert empty string or whitespace-only to None
+            self.api_key = api_key.strip() if api_key and api_key.strip() else None
+
         if "category" in config:
-            self.category = config["category"]
+            self.category = extract_config_value(config, "category", default="popular", converter=to_str)
+
         if "count" in config:
-            self.count = int(config["count"])
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            self.count = min(count, 100)  # Cap at 100 (Unsplash API limit)
 
         # Reset scan cache when config changes
         self._last_scan = None
@@ -336,26 +348,12 @@ def create_plugin_instance(
 
     enabled = config.get("enabled", False)  # Default to disabled
 
-    # Extract config values
-    api_key = config.get("api_key", "")
-    category = config.get("category", "popular")
-    count = config.get("count", 30)
+    # Extract config values using utility functions
+    api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+    api_key = api_key if api_key else None
 
-    # Handle schema objects
-    if isinstance(api_key, dict):
-        api_key = api_key.get("value") or api_key.get("default") or ""
-    api_key = str(api_key) if api_key else None
-
-    if isinstance(category, dict):
-        category = category.get("value") or category.get("default") or "popular"
-    category = str(category) if category else "popular"
-
-    if isinstance(count, dict):
-        count = count.get("value") or count.get("default") or 30
-    try:
-        count = int(count) if count else 30
-    except (ValueError, TypeError):
-        count = 30
+    category = extract_config_value(config, "category", default="popular", converter=to_str)
+    count = extract_config_value(config, "count", default=30, converter=to_int)
 
     return UnsplashImagePlugin(
         plugin_id=plugin_id,
@@ -364,6 +362,40 @@ def create_plugin_instance(
         category=category,
         count=count,
         enabled=enabled,
+    )
+
+
+@hookimpl
+async def handle_plugin_config_update(
+    type_id: str,
+    config: dict[str, Any],
+    enabled: bool | None,
+    db_type: Any,
+    session: Any,
+) -> dict[str, Any] | None:
+    """Handle Unsplash plugin configuration update and instance management."""
+    if type_id != "unsplash":
+        return None
+
+    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
+        """Normalize config values."""
+        api_key = extract_config_value(c, "api_key", default="", converter=to_str)
+        return {
+            "api_key": api_key if api_key else None,
+            "category": extract_config_value(c, "category", default="popular", converter=to_str),
+            "count": extract_config_value(c, "count", default=30, converter=to_int),
+        }
+
+    manager_config = InstanceManagerConfig(
+        type_id="unsplash",
+        single_instance=True,
+        instance_id="unsplash-instance",
+        normalize_config=normalize_config,
+        default_instance_name="Unsplash",
+    )
+
+    return await handle_plugin_config_update_generic(
+        type_id, config, enabled, db_type, session, manager_config
     )
 
 
