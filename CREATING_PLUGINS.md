@@ -198,10 +198,174 @@ If your plugin requires Python packages, add them to `plugin.json`:
 
 ### Step 6: Test Your Plugin
 
+#### Writing Tests
+
+Create a test file (e.g., `test_my_plugin.py`) in your plugin directory:
+
+```python
+"""Tests for My Plugin.
+
+These tests should be run from the backend directory:
+    cd backend
+    pytest ../calvin-plugins/my-plugin/test_my_plugin.py
+"""
+
+import pytest
+
+# Import your plugin class
+from pathlib import Path
+import importlib.util
+
+plugin_path = Path(__file__).parent / "plugin.py"
+spec = importlib.util.spec_from_file_location("my_plugin", plugin_path)
+my_plugin_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(my_plugin_module)
+MyPlugin = my_plugin_module.MyPlugin
+
+
+@pytest.fixture
+def my_plugin():
+    """Create a plugin instance for testing."""
+    return MyPlugin(
+        plugin_id="test-instance",
+        name="Test Plugin",
+        api_key="test-key",
+        enabled=True,
+    )
+
+
+class TestMyPlugin:
+    """Tests for MyPlugin class."""
+
+    def test_get_plugin_metadata(self):
+        """Test plugin metadata."""
+        metadata = MyPlugin.get_plugin_metadata()
+        assert metadata["type_id"] == "my_plugin"
+        assert metadata["name"] == "My Plugin"
+
+    def test_init(self, my_plugin):
+        """Test plugin initialization."""
+        assert my_plugin.plugin_id == "test-instance"
+        assert my_plugin.api_key == "test-key"
+        assert my_plugin.enabled is True
+
+    @pytest.mark.asyncio
+    async def test_validate_config(self, my_plugin):
+        """Test config validation."""
+        assert await my_plugin.validate_config({"api_key": "valid"}) is True
+        assert await my_plugin.validate_config({"api_key": ""}) is False
+
+    @pytest.mark.asyncio
+    async def test_configure(self, my_plugin):
+        """Test plugin configuration."""
+        await my_plugin.configure({"api_key": "new-key"})
+        assert my_plugin.api_key == "new-key"
+
+
+@pytest.mark.asyncio
+class TestMyPluginHooks:
+    """Tests for plugin hooks."""
+
+    async def test_create_plugin_instance(self):
+        """Test create_plugin_instance hook."""
+        # Test the hook implementation
+        pass
+
+    async def test_handle_plugin_config_update(self):
+        """Test handle_plugin_config_update hook.
+        
+        Note: This test is skipped when run from the plugin directory because it requires
+        the `test_db` fixture which is only available in the backend test suite.
+        
+        To test handle_plugin_config_update hooks, run the backend test suite from the
+        backend directory:
+            cd backend
+            pytest tests/unit/test_plugin_hooks.py
+        """
+        pytest.skip("Requires backend test fixtures (test_db). "
+                   "Run from backend directory: "
+                   "cd backend && pytest tests/unit/test_plugin_hooks.py")
+```
+
+#### Testing Plugin Class Methods
+
+You can test most plugin functionality (metadata, initialization, validation, configuration) by running tests from the plugin directory:
+
+```bash
+cd calvin-plugins/my-plugin
+pytest test_my_plugin.py -v
+```
+
+Or from the backend directory:
+
+```bash
+cd backend
+pytest ../calvin-plugins/my-plugin/test_my_plugin.py -v
+```
+
+#### Testing `handle_plugin_config_update` Hook
+
+The `handle_plugin_config_update` hook requires database access and backend fixtures, so it cannot be tested directly from the plugin directory. Instead:
+
+1. **Write tests in your plugin test file** that skip when backend fixtures aren't available (as shown above).
+
+2. **Run hook tests from the backend directory**:
+   ```bash
+   cd backend
+   pytest tests/unit/test_plugin_hooks.py -v
+   ```
+
+   This test suite:
+   - Loads plugin hooks directly from plugin files
+   - Tests that hooks correctly call `handle_plugin_config_update_generic`
+   - Verifies database entries are created correctly
+   - Uses the `test_db` fixture for proper database isolation
+
+3. **Or run the comprehensive generic handler tests**:
+   ```bash
+   cd backend
+   pytest tests/unit/test_plugin_instance_manager.py -v
+   ```
+
+   These tests verify that `handle_plugin_config_update_generic` (which all plugin hooks now use) works correctly for both single-instance and multi-instance plugins.
+
+#### What to Test
+
+- **Plugin metadata**: Verify `get_plugin_metadata()` returns correct values
+- **Initialization**: Test `__init__` and `initialize()` methods
+- **Configuration validation**: Test `validate_config()` with valid and invalid inputs
+- **Configuration updates**: Test `configure()` method updates plugin state correctly
+- **Plugin-specific methods**: Test all methods required by your plugin type
+- **Hook integration**: Test that `handle_plugin_config_update` correctly uses the generic instance manager (from backend test suite)
+
+#### Running Tests
+
+**From plugin directory** (tests plugin class methods):
+```bash
+cd calvin-plugins/my-plugin
+pytest test_my_plugin.py -v
+```
+
+**From backend directory** (tests hooks and integration):
+```bash
+cd backend
+# Test all plugin hooks
+pytest tests/unit/test_plugin_hooks.py -v
+
+# Test specific plugin hook
+pytest tests/unit/test_plugin_hooks.py::TestPluginHooks::test_my_plugin_handle_plugin_config_update -v
+
+# Test plugin class methods from plugin directory
+pytest ../calvin-plugins/my-plugin/test_my_plugin.py -v
+```
+
+#### Manual Testing
+
 1. Package your plugin as a zip file
 2. Install it via the Calvin UI or API
-3. Test all functionality
+3. Test all functionality through the UI
 4. Verify configuration works correctly
+5. Test instance creation/updates/deletion
 
 ### Step 7: Add to Repository
 
