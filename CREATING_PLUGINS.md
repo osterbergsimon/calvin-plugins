@@ -72,16 +72,22 @@ See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugi
 
 ### Step 3: Create Plugin Implementation (`plugin.py`)
 
-Create `plugin.py` with your plugin implementation:
+Create `plugin.py` with your plugin implementation. **Use the generic instance manager and config utilities** to simplify your code:
 
 ```python
 """My custom plugin."""
 
+import hashlib
 from typing import Any
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
+from app.plugins.utils.config import extract_config_value, to_str
+from app.plugins.utils.instance_manager import (
+    InstanceManagerConfig,
+    handle_plugin_config_update_generic,
+)
 
 
 class MyServicePlugin(ServicePlugin):
@@ -96,7 +102,10 @@ class MyServicePlugin(ServicePlugin):
             "name": "My Plugin",
             "description": "A custom plugin",
             "version": "1.0.0",
-            "common_config_schema": {
+            "supports_multiple_instances": True,  # Set to False for single-instance plugins
+            "common_config_schema": {},  # Plugin-type-level settings (rarely used)
+            "instance_config_schema": {
+                # Instance-specific settings
                 "api_key": {
                     "type": "password",
                     "description": "API key",
@@ -114,7 +123,7 @@ class MyServicePlugin(ServicePlugin):
             "plugin_class": cls,
         }
 
-    def __init__(self, plugin_id: str, name: str, api_key: str, enabled: bool = True):
+    def __init__(self, plugin_id: str, name: str, api_key: str = "", enabled: bool = True):
         """Initialize plugin."""
         super().__init__(plugin_id, name, enabled)
         self.api_key = api_key
@@ -135,8 +144,13 @@ class MyServicePlugin(ServicePlugin):
         }
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin configuration."""
-        return "api_key" in config and bool(config["api_key"])
+        """Validate plugin configuration using config utilities."""
+        api_key = extract_config_value(config, "api_key", to_str, "")
+        return bool(api_key)
+
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Update plugin configuration using config utilities."""
+        self.api_key = extract_config_value(config, "api_key", to_str, self.api_key)
 
 
 # Register plugin with pluggy
@@ -153,12 +167,13 @@ def create_plugin_instance(
     name: str,
     config: dict[str, Any],
 ) -> MyServicePlugin | None:
-    """Create plugin instance."""
+    """Create plugin instance using config utilities."""
     if type_id != "my_plugin":
         return None
 
     enabled = config.get("enabled", False)
-    api_key = config.get("api_key", "")
+    # Use extract_config_value for type-safe config extraction
+    api_key = extract_config_value(config, "api_key", to_str, "")
 
     return MyServicePlugin(
         plugin_id=plugin_id,
@@ -166,7 +181,54 @@ def create_plugin_instance(
         api_key=api_key,
         enabled=enabled,
     )
+
+
+@hookimpl
+async def handle_plugin_config_update(
+    type_id: str,
+    config: dict[str, Any],
+    enabled: bool | None,
+    db_type: Any,
+    session: Any,
+) -> dict[str, Any] | None:
+    """Handle plugin configuration updates using generic instance manager."""
+    if type_id != "my_plugin":
+        return None
+
+    # Define how to generate instance IDs (optional for multi-instance plugins)
+    def generate_instance_id(c: dict[str, Any]) -> str:
+        """Generate unique instance ID based on config."""
+        # For multi-instance plugins, create a hash from unique config values
+        # For single-instance plugins, return a fixed ID like "my-plugin-instance"
+        unique_str = f"my_plugin_{c.get('api_key', '')}"
+        return f"my-plugin-{hashlib.md5(unique_str.encode()).hexdigest()[:8]}"
+
+    # Configure the generic instance manager
+    manager_config = InstanceManagerConfig(
+        type_id="my_plugin",
+        plugin_class=MyServicePlugin,
+        validate_config=MyServicePlugin(None, "").validate_config,
+        normalize_config=lambda c: c,  # Add normalization if needed
+        generate_instance_id=generate_instance_id,  # Optional for multi-instance
+    )
+
+    return await handle_plugin_config_update_generic(
+        type_id=type_id,
+        config=config,
+        enabled=enabled,
+        db_type=db_type,
+        session=session,
+        manager_config=manager_config,
+    )
 ```
+
+**Key points:**
+
+1. **Use config utilities** (`extract_config_value`, `to_str`, `to_int`, `to_bool`, `to_float`) for type-safe configuration extraction
+2. **Declare `supports_multiple_instances`** in metadata (`True` for multi-instance, `False` for single-instance)
+3. **Use `instance_config_schema`** for instance-specific settings and `common_config_schema` for plugin-type-level settings (rare)
+4. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation/updates
+5. **Provide `generate_instance_id`** function for multi-instance plugins (optional - defaults to hash-based ID)
 
 ### Step 4: Add Frontend Components (Optional)
 
@@ -439,15 +501,19 @@ Display web services, APIs, or custom content.
 ## Best Practices
 
 1. **Use semantic versioning** for plugin versions
-2. **Validate configuration** in `validate_config()` method
-3. **Handle errors gracefully** with proper error messages
-4. **Document dependencies** in `plugin.json`
-5. **Test plugins** before distribution
-6. **Follow naming conventions**: lowercase with underscores for IDs
-7. **Include format_version** in `plugin.json` for future compatibility
-8. **Specify dependencies** explicitly to avoid runtime errors
-9. **Exclude unnecessary files** to reduce plugin size
-10. **Document permissions** required by your plugin
+2. **Use config utilities** (`extract_config_value`, `to_str`, `to_int`, etc.) for type-safe configuration extraction
+3. **Use generic instance manager** (`handle_plugin_config_update_generic`) instead of manually managing instances
+4. **Declare `supports_multiple_instances`** in metadata (`True` for multi-instance, `False` for single-instance)
+5. **Use `instance_config_schema`** for instance-specific settings and `common_config_schema` only for plugin-type-level settings (rare)
+6. **Validate configuration** in `validate_config()` method using config utilities
+7. **Handle errors gracefully** with proper error messages
+8. **Document dependencies** in `plugin.json`
+9. **Test plugins** before distribution
+10. **Follow naming conventions**: lowercase with underscores for IDs
+11. **Include format_version** in `plugin.json` for future compatibility
+12. **Specify dependencies** explicitly to avoid runtime errors
+13. **Exclude unnecessary files** to reduce plugin size
+14. **Document permissions** required by your plugin
 
 ## Resources
 
