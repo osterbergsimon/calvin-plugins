@@ -8,6 +8,11 @@ import httpx
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
+from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
+from app.plugins.utils.instance_manager import (
+    InstanceManagerConfig,
+    handle_plugin_config_update_generic,
+)
 
 
 class MealieServicePlugin(ServicePlugin):
@@ -22,6 +27,7 @@ class MealieServicePlugin(ServicePlugin):
             "name": "Mealie Meal Plan",
             "description": "Display weekly meal plan from Mealie recipe manager",
             "version": "1.0.0",
+            "supports_multiple_instances": False,  # Single-instance plugin
             "common_config_schema": {
                 "display_order": {
                     "type": "integer",
@@ -540,16 +546,27 @@ class MealieServicePlugin(ServicePlugin):
         Returns:
             True if configuration is valid
         """
-        required_fields = ["mealie_url", "api_token"]
-        for field in required_fields:
-            if field not in config or not config[field]:
-                return False
+        # Check required fields
+        mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
+        api_token = extract_config_value(config, "api_token", default="", converter=to_str)
 
-        url = config["mealie_url"]
-        if not isinstance(url, str) or not url.strip():
+        if not mealie_url or not mealie_url.strip():
+            return False
+        if not api_token or not api_token.strip():
             return False
 
-        return url.startswith("http://") or url.startswith("https://")
+        # URL must be valid
+        url = mealie_url.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return False
+
+        # Days ahead should be valid if provided
+        if "days_ahead" in config:
+            days_ahead = extract_config_value(config, "days_ahead", default=7, converter=to_int)
+            if days_ahead < 1 or days_ahead > 30:
+                return False
+
+        return True
 
     async def configure(self, config: dict[str, Any]) -> None:
         """
@@ -565,42 +582,20 @@ class MealieServicePlugin(ServicePlugin):
             await self._client.aclose()
 
         if "mealie_url" in config:
-            mealie_url_value = config["mealie_url"]
-            # Handle schema objects
-            if isinstance(mealie_url_value, dict):
-                mealie_url_value = (
-                    mealie_url_value.get("value") or mealie_url_value.get("default") or ""
-                )
-            self.mealie_url = str(mealie_url_value).rstrip("/") if mealie_url_value else ""
+            mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
+            self.mealie_url = mealie_url.rstrip("/") if mealie_url else ""
         if "api_token" in config:
-            api_token_value = config["api_token"]
-            # Handle schema objects
-            if isinstance(api_token_value, dict):
-                api_token_value = (
-                    api_token_value.get("value") or api_token_value.get("default") or ""
-                )
-            self.api_token = str(api_token_value).strip() if api_token_value else ""
+            api_token = extract_config_value(config, "api_token", default="", converter=to_str)
+            self.api_token = api_token.strip() if api_token else ""
         if "group_id" in config:
-            group_id_value = config["group_id"]
-            # Handle schema objects
-            if isinstance(group_id_value, dict):
-                group_id_value = group_id_value.get("value") or group_id_value.get("default") or ""
-            self.group_id = str(group_id_value).strip() if group_id_value else None
+            group_id = extract_config_value(config, "group_id", default="", converter=to_str)
+            self.group_id = group_id.strip() if group_id else None
         if "days_ahead" in config:
-            days_ahead_value = config["days_ahead"]
-            # Handle schema objects
-            if isinstance(days_ahead_value, dict):
-                days_ahead_value = (
-                    days_ahead_value.get("value") or days_ahead_value.get("default") or 7
-                )
-            try:
-                self.days_ahead = int(days_ahead_value) if days_ahead_value else 7
-            except (ValueError, TypeError):
-                self.days_ahead = 7
+            self.days_ahead = extract_config_value(config, "days_ahead", default=7, converter=to_int)
         if "display_order" in config:
-            self.display_order = int(config.get("display_order", 0))
+            self.display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
         if "fullscreen" in config:
-            self.fullscreen = bool(config.get("fullscreen", False))
+            self.fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
         # Reinitialize with new config
         await self.initialize()
@@ -691,35 +686,20 @@ def create_plugin_instance(
         return None
 
     enabled = config.get("enabled", False)  # Default to disabled
-    display_order = config.get("display_order", 0)
-    fullscreen = config.get("fullscreen", False)
 
-    # Extract config values
-    mealie_url = config.get("mealie_url", "")
-    api_token = config.get("api_token", "")
-    group_id = config.get("group_id")
-    days_ahead = config.get("days_ahead", 7)
-
-    # Handle schema objects
-    if isinstance(mealie_url, dict):
-        mealie_url = mealie_url.get("value") or mealie_url.get("default") or ""
-    mealie_url = str(mealie_url).strip() if mealie_url else ""
-
-    if isinstance(api_token, dict):
-        api_token = api_token.get("value") or api_token.get("default") or ""
-    api_token = str(api_token).strip() if api_token else ""
-
-    if isinstance(group_id, dict):
-        group_id = group_id.get("value") or group_id.get("default") or ""
-    group_id = str(group_id).strip() if group_id else None
-
-    # Handle days_ahead
-    if isinstance(days_ahead, dict):
-        days_ahead = days_ahead.get("value") or days_ahead.get("default") or 7
-    try:
-        days_ahead = int(days_ahead) if days_ahead else 7
-    except (ValueError, TypeError):
-        days_ahead = 7
+    # Extract config values using utility functions
+    mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
+    mealie_url = mealie_url.rstrip("/") if mealie_url else ""
+    
+    api_token = extract_config_value(config, "api_token", default="", converter=to_str)
+    api_token = api_token.strip() if api_token else ""
+    
+    group_id = extract_config_value(config, "group_id", default="", converter=to_str)
+    group_id = group_id.strip() if group_id else None
+    
+    days_ahead = extract_config_value(config, "days_ahead", default=7, converter=to_int)
+    display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
+    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
     return MealieServicePlugin(
         plugin_id=plugin_id,
@@ -944,204 +924,79 @@ async def handle_plugin_config_update(
 
     import logging
 
-    from sqlalchemy import select
-
-    from app.models.db_models import PluginDB
-    from app.plugins.manager import plugin_manager
-    from app.plugins.registry import plugin_registry
-
     logger = logging.getLogger(__name__)
 
-    # Check if we have required config (URL and API token)
-    # Handle both dict (schema object) and string values
-    # Also check if config comes from common_config_schema (which stores values directly)
-    mealie_url = config.get("mealie_url", "")
-    if isinstance(mealie_url, dict):
-        mealie_url = mealie_url.get("value") or mealie_url.get("default") or ""
-    mealie_url = str(mealie_url).strip() if mealie_url else ""
+    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
+        """Normalize config values."""
+        mealie_url = extract_config_value(c, "mealie_url", default="", converter=to_str)
+        mealie_url = mealie_url.rstrip("/") if mealie_url else ""
+        
+        api_token = extract_config_value(c, "api_token", default="", converter=to_str)
+        api_token = api_token.strip() if api_token else ""
 
-    api_token = config.get("api_token", "")
-    if isinstance(api_token, dict):
-        api_token = api_token.get("value") or api_token.get("default") or ""
-    api_token = str(api_token).strip() if api_token else ""
+        # Log token status (without exposing actual token)
+        token_status = "present" if api_token else "missing"
+        token_length = len(api_token) if api_token else 0
+        logger.info(
+            f"[Mealie] Config update received - URL: {mealie_url}, "
+            f"API token: {token_status} (length: {token_length})"
+        )
 
-    # Log token status (without exposing actual token)
-    token_status = "present" if api_token else "missing"
-    token_length = len(api_token) if api_token else 0
-    logger.info(
-        f"[Mealie] Config update received - URL: {mealie_url}, "
-        f"API token: {token_status} (length: {token_length})"
-    )
-
-    # Also check if we can get the token from db_type.common_config_schema as fallback
-    if not api_token and db_type and db_type.common_config_schema:
-        fallback_token = db_type.common_config_schema.get("api_token", "")
-        if fallback_token:
-            api_token = str(fallback_token).strip()
-            logger.info(
-                f"[Mealie] Retrieved API token from db_type.common_config_schema "
-                f"(length: {len(api_token)})"
-            )
-
-    if not mealie_url or not api_token:
-        logger.info("[Mealie] Skipping instance creation - missing URL or API token")
-        return {"instance_created": False, "instance_updated": False}
-
-    # Check if Mealie instance exists
-    result = await session.execute(select(PluginDB).where(PluginDB.type_id == "mealie"))
-    mealie_instance = result.scalar_one_or_none()
-
-    # Get days_ahead from config, default to 7 (handle dict values)
-    days_ahead = config.get("days_ahead", "7")
-    if isinstance(days_ahead, dict):
-        days_ahead = days_ahead.get("value") or days_ahead.get("default") or "7"
-    try:
-        days_ahead = int(days_ahead) if days_ahead else 7
-    except (ValueError, TypeError):
-        days_ahead = 7
-
-    # Extract group_id properly (handle dict values)
-    group_id = config.get("group_id", "")
-    if isinstance(group_id, dict):
-        group_id = group_id.get("value") or group_id.get("default") or ""
-    group_id = str(group_id).strip() if group_id else ""
-
-    instance_config = {
-        "mealie_url": mealie_url,
-        "api_token": api_token,  # Ensure this is a string, not a dict
-        "group_id": group_id,
-        "days_ahead": days_ahead,
-        "display_order": 0,
-        "fullscreen": False,
-    }
-
-    # Log final config (masking sensitive values)
-    logger.info(
-        f"[Mealie] Instance config prepared - "
-        f"URL: {mealie_url}, "
-        f"API token: {'present' if api_token else 'missing'} "
-        f"(length: {len(api_token) if api_token else 0}), "
-        f"Group ID: {group_id or 'not specified'}, "
-        f"Days ahead: {days_ahead}"
-    )
-
-    if not mealie_instance:
-        # Create new Mealie instance
-        plugin_instance_id = f"mealie-{abs(hash(mealie_url)) % 10000}"
-        logger.info(f"[Mealie] Creating new instance: {plugin_instance_id}")
-        try:
-            instance_enabled = (
-                enabled if enabled is not None else (db_type.enabled if db_type else True)
-            )
-
-            # Verify config before creating instance
-            logger.info(
-                f"[Mealie] Creating instance with config - "
-                f"API token: {'present' if instance_config.get('api_token') else 'missing'} "
-                f"(length: {len(instance_config.get('api_token', ''))})"
-            )
-
-            plugin = await plugin_registry.register_plugin(
-                plugin_id=plugin_instance_id,
-                type_id="mealie",
-                name="Mealie Meal Plan",
-                config=instance_config,
-                enabled=instance_enabled,
-            )
-
-            # Verify the instance was created with correct config
-            created_instance_result = await session.execute(
-                select(PluginDB).where(PluginDB.id == plugin_instance_id)
-            )
-            created_instance = created_instance_result.scalar_one_or_none()
-            if created_instance:
-                saved_token = (
-                    created_instance.config.get("api_token", "") if created_instance.config else ""
-                )
+        # Also check if we can get the token from db_type.common_config_schema as fallback
+        if not api_token and db_type and db_type.common_config_schema:
+            fallback_token = db_type.common_config_schema.get("api_token", "")
+            if fallback_token:
+                api_token = str(fallback_token).strip()
                 logger.info(
-                    f"[Mealie] Instance created successfully - "
-                    f"API token in DB: {'present' if saved_token else 'missing'} "
-                    f"(length: {len(saved_token)})"
+                    f"[Mealie] Retrieved API token from db_type.common_config_schema "
+                    f"(length: {len(api_token)})"
                 )
 
-            return {
-                "instance_created": True,
-                "instance_id": plugin_instance_id,
-            }
-        except Exception as e:
-            logger.error(f"[Mealie] Failed to create instance: {e}", exc_info=True)
-            return {"instance_created": False, "error": str(e)}
-    else:
-        # Update existing Mealie instance
-        logger.info(f"[Mealie] Updating existing instance: {mealie_instance.id}")
-        plugin = plugin_manager.get_plugin(mealie_instance.id)
-        if plugin:
-            await plugin.configure(instance_config)
-            instance_enabled = (
-                enabled
-                if enabled is not None
-                else (db_type.enabled if db_type else mealie_instance.enabled)
-            )
+        group_id = extract_config_value(c, "group_id", default="", converter=to_str)
+        group_id = group_id.strip() if group_id else ""
 
-            if instance_enabled:
-                plugin.enable()
-                if not plugin.is_running():
-                    try:
-                        await plugin.initialize()
-                        plugin.start()
-                    except Exception as e:
-                        logger.error(f"[Mealie] Error starting plugin: {e}", exc_info=True)
-            else:
-                plugin.disable()
-                if plugin.is_running():
-                    try:
-                        plugin.stop()
-                        await plugin.cleanup()
-                    except Exception as e:
-                        logger.warning(f"[Mealie] Error stopping plugin: {e}", exc_info=True)
+        return {
+            "mealie_url": mealie_url,
+            "api_token": api_token,
+            "group_id": group_id,
+            "days_ahead": extract_config_value(c, "days_ahead", default=7, converter=to_int),
+            "display_order": extract_config_value(c, "display_order", default=0, converter=to_int),
+            "fullscreen": extract_config_value(c, "fullscreen", default=False, converter=to_bool),
+        }
 
-            # Update in database
-            mealie_instance.config = instance_config
-            mealie_instance.enabled = instance_enabled
-            if db_type:
-                db_type.enabled = instance_enabled
+    def validate_config(c: dict[str, Any]) -> bool:
+        """Validate config before creating/updating instance."""
+        # Check required fields
+        mealie_url = c.get("mealie_url", "")
+        api_token = c.get("api_token", "")
 
-            # Verify API token is in config before saving
-            saved_token_status = "present" if instance_config.get("api_token") else "missing"
-            saved_token_length = len(instance_config.get("api_token", ""))
-            logger.info(
-                f"[Mealie] Saving config to database - "
-                f"API token: {saved_token_status} (length: {saved_token_length})"
-            )
+        if not mealie_url or not mealie_url.strip():
+            logger.info("[Mealie] Skipping instance creation - missing URL")
+            return False
+        if not api_token or not api_token.strip():
+            logger.info("[Mealie] Skipping instance creation - missing API token")
+            return False
 
-            await session.commit()
+        # URL must be valid
+        url = mealie_url.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            logger.info("[Mealie] Skipping instance creation - invalid URL")
+            return False
 
-            # Verify the config was actually saved by refreshing and checking
-            session.refresh(mealie_instance)
-            saved_config = mealie_instance.config or {}
-            saved_token = saved_config.get("api_token", "")
-            logger.info(
-                f"[Mealie] Config successfully saved to database for {mealie_instance.id} - "
-                f"API token in DB: {'present' if saved_token else 'missing'} "
-                f"(length: {len(saved_token)})"
-            )
+        return True
 
-            # Double-check that the saved token matches what we tried to save
-            if saved_token != api_token:
-                logger.warning(
-                    f"[Mealie] WARNING: Saved API token does not match input token! "
-                    f"Input length: {len(api_token)}, Saved length: {len(saved_token)}"
-                )
-            else:
-                logger.info("[Mealie] API token verified - matches saved value")
+    manager_config = InstanceManagerConfig(
+        type_id="mealie",
+        single_instance=True,
+        instance_id="mealie-instance",
+        validate_config=validate_config,
+        normalize_config=normalize_config,
+        default_instance_name="Mealie Meal Plan",
+    )
 
-            return {
-                "instance_updated": True,
-                "instance_id": mealie_instance.id,
-            }
-        else:
-            logger.warning(f"[Mealie] Plugin instance {mealie_instance.id} not found in manager")
-            return {"instance_updated": False, "error": "Plugin instance not found"}
+    return await handle_plugin_config_update_generic(
+        type_id, config, enabled, db_type, session, manager_config
+    )
 
 
 
