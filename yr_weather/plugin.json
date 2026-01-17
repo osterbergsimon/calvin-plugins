@@ -1,0 +1,32 @@
+{
+  "format_version": "1.0.0",
+  "id": "yr_weather",
+  "name": "Yr.no Weather",
+  "version": "1.0.0",
+  "type": "service",
+  "description": "Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["weather", "forecast", "yr.no", "met.no", "norway", "service"],
+  "dependencies": {
+    "python": ">=3.10",
+    "calvin": ">=1.0.0"
+  },
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
+  },
+  "requirements": {
+    "restart_required": true,
+    "config_required": true
+  }
+}
