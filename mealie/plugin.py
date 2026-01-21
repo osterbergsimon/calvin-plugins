@@ -27,7 +27,7 @@ class MealieServicePlugin(ServicePlugin):
             "name": "Mealie Meal Plan",
             "description": "Display weekly meal plan from Mealie recipe manager",
             "version": "1.0.0",
-            "supports_multiple_instances": False,  # Single-instance plugin
+            "supports_multiple_instances": True,  # Multi-instance plugin
             "common_config_schema": {
                 "display_order": {
                     "type": "integer",
@@ -980,8 +980,7 @@ async def handle_plugin_config_update(
 
     manager_config = InstanceManagerConfig(
         type_id="mealie",
-        single_instance=True,
-        instance_id="mealie-instance",
+        single_instance=False,  # Multi-instance plugin
         validate_config=validate_config,
         normalize_config=normalize_config,
         default_instance_name="Mealie Meal Plan",
