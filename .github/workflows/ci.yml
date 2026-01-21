@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-plugins:
+    name: Test Plugins
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    
+    steps:
+      - name: Checkout calvin-plugins
+        uses: actions/checkout@v4
+        with:
+          path: calvin-plugins
+      
+      - name: Checkout calvin (for backend dependencies)
+        uses: actions/checkout@v4
+        with:
+          repository: osterbergsimon/calvin
+          path: calvin
+          # Use the base branch for PRs, or the same branch for pushes
+          # This ensures plugins are tested against the correct calvin version
+          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+      
+      - name: Install UV
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install calvin backend dependencies
+        working-directory: ./calvin/backend
+        run: uv sync --extra dev
+      
+      - name: Run plugin tests
+        working-directory: ./calvin/backend
+        env:
+          # Set PYTHONPATH to include calvin-plugins so plugins can be imported
+          PYTHONPATH: ${{ github.workspace }}/calvin-plugins:${{ github.workspace }}/calvin/backend
+        run: |
+          # Run all plugin test files from the backend directory
+          # pytest will discover and run all test_*.py files in calvin-plugins
+          uv run pytest ../calvin-plugins -v --tb=short
