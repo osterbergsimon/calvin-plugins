@@ -607,58 +607,51 @@ class MealieServicePlugin(ServicePlugin):
         """
         import traceback
 
-        from sqlalchemy import select
-
-        from app.database import AsyncSessionLocal
         from app.models.db_models import PluginDB
 
         try:
             print(f"[Mealie] Reloading config from DB for plugin_id: {self.plugin_id}")
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(PluginDB).where(PluginDB.id == self.plugin_id)
-                )
-                db_plugin = result.scalar_one_or_none()
+            db_plugin = await PluginDB.objects.get_or_none(id=self.plugin_id)
 
-                if not db_plugin:
-                    print(f"[Mealie] WARNING: Plugin {self.plugin_id} not found in database")
-                    return
+            if not db_plugin:
+                print(f"[Mealie] WARNING: Plugin {self.plugin_id} not found in database")
+                return
 
-                if not db_plugin.config:
-                    print(f"[Mealie] WARNING: Plugin {self.plugin_id} has no config in database")
-                    return
+            if not db_plugin.config:
+                print(f"[Mealie] WARNING: Plugin {self.plugin_id} has no config in database")
+                return
 
-                config = db_plugin.config
-                print(f"[Mealie] Found config in DB with keys: {list(config.keys())}")
+            config = db_plugin.config
+            print(f"[Mealie] Found config in DB with keys: {list(config.keys())}")
 
-                # Check if API token has changed
-                new_api_token = config.get("api_token", "")
-                if isinstance(new_api_token, dict):
-                    new_api_token = new_api_token.get("value") or new_api_token.get("default") or ""
-                new_api_token = str(new_api_token).strip() if new_api_token else ""
+            # Check if API token has changed
+            new_api_token = config.get("api_token", "")
+            if isinstance(new_api_token, dict):
+                new_api_token = new_api_token.get("value") or new_api_token.get("default") or ""
+            new_api_token = str(new_api_token).strip() if new_api_token else ""
 
-                current_token_length = len(self.api_token) if self.api_token else 0
-                new_token_length = len(new_api_token) if new_api_token else 0
+            current_token_length = len(self.api_token) if self.api_token else 0
+            new_token_length = len(new_api_token) if new_api_token else 0
+            print(
+                f"[Mealie] Token comparison - current: {current_token_length} chars, "
+                f"new: {new_token_length} chars"
+            )
+
+            # Only reconfigure if API token has changed or is missing
+            if new_api_token and new_api_token != self.api_token:
                 print(
-                    f"[Mealie] Token comparison - current: {current_token_length} chars, "
-                    f"new: {new_token_length} chars"
+                    f"[Mealie] API token changed, reloading config from database "
+                    f"(old length: {len(self.api_token)}, new length: {len(new_api_token)})"
                 )
-
-                # Only reconfigure if API token has changed or is missing
-                if new_api_token and new_api_token != self.api_token:
-                    print(
-                        f"[Mealie] API token changed, reloading config from database "
-                        f"(old length: {len(self.api_token)}, new length: {len(new_api_token)})"
-                    )
-                    await self.configure(config)
-                elif not self.api_token and new_api_token:
-                    print(
-                        f"[Mealie] API token was missing, reloading config from database "
-                        f"(new length: {len(new_api_token)})"
-                    )
-                    await self.configure(config)
-                else:
-                    print("[Mealie] API token unchanged, no reload needed")
+                await self.configure(config)
+            elif not self.api_token and new_api_token:
+                print(
+                    f"[Mealie] API token was missing, reloading config from database "
+                    f"(new length: {len(new_api_token)})"
+                )
+                await self.configure(config)
+            else:
+                print("[Mealie] API token unchanged, no reload needed")
         except Exception as e:
             print(f"[Mealie] ERROR reloading config from database: {e}")
             print("[Mealie] Traceback:")
