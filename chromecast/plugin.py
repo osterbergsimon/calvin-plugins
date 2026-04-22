@@ -41,11 +41,11 @@ class ChromecastServicePlugin(ServicePlugin):
             "instance_config_schema": {
                 "device_name": {
                     "type": "string",
-                    "description": "Friendly name of the Chromecast (leave blank to use the first found)",
+                    "description": "Chromecast device",
                     "default": "",
                     "ui": {
-                        "component": "text",
-                        "placeholder": "Living Room TV (leave blank for auto-discovery)",
+                        "component": "select-scan",
+                        "placeholder": "Click Scan to discover devices on your network",
                     },
                 },
                 "discovery_timeout": {
@@ -168,6 +168,25 @@ class ChromecastServicePlugin(ServicePlugin):
         await super().configure(config)
         self.device_name = extract_config_value(config, "device_name", default="", converter=to_str)
         self.discovery_timeout = extract_config_value(config, "discovery_timeout", default=5, converter=to_int)
+
+
+@hookimpl
+async def scan_plugin_options(type_id: str, field_key: str) -> dict[str, Any] | None:
+    if type_id != "chromecast" or field_key != "device_name":
+        return None
+    if not _PYCHROMECAST_AVAILABLE:
+        return {"options": [], "error": "pychromecast is not installed"}
+
+    def _discover():
+        chromecasts, browser = pychromecast.get_chromecasts(timeout=5)
+        pychromecast.discovery.stop_discovery(browser)
+        return [
+            {"value": c.cast_info.friendly_name, "label": c.cast_info.friendly_name}
+            for c in chromecasts
+        ]
+
+    options = await asyncio.get_event_loop().run_in_executor(None, _discover)
+    return {"options": options}
 
 
 @hookimpl
