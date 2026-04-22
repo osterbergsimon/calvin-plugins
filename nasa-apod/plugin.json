@@ -1,0 +1,32 @@
+{
+  "format_version": "1.0.0",
+  "id": "nasa_apod",
+  "name": "NASA APOD",
+  "version": "1.0.0",
+  "type": "image",
+  "description": "Astronomy Picture of the Day from NASA — daily curated space images with titles and descriptions",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["image", "photos", "nasa", "space", "astronomy", "apod"],
+  "dependencies": {
+    "python": ">=3.10",
+    "calvin": ">=1.0.0"
+  },
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
+  },
+  "requirements": {
+    "restart_required": true,
+    "config_required": false
+  }
+}
