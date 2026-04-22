@@ -4,10 +4,40 @@ This guide provides everything you need to create plugins for the Calvin dashboa
 
 ## Quick Start
 
+Use the scaffold script to generate a new plugin in seconds:
+
+```bash
+python scripts/create_plugin.py <type> <id> [options]
+```
+
+**Types:** `service`, `image`, `calendar`, `backend`
+
+**Examples:**
+```bash
+python scripts/create_plugin.py service yr-pro --name "Yr.no Pro" --label Location
+python scripts/create_plugin.py image flickr --name Flickr --description "Photos from Flickr"
+python scripts/create_plugin.py calendar my-cal --name "My Calendar"
+python scripts/create_plugin.py backend resize-worker --single
+```
+
+**Options:**
+- `--name NAME` — Human-readable name (default: title-cased id)
+- `--description DESC` — Short description
+- `--single` — Single-instance plugin (default: multi-instance)
+- `--label LABEL` — Instance label shown in UI (e.g. `Location`, `Device`, `Gallery`)
+- `--author AUTHOR` — Author name
+- `--no-tests` — Skip generating test file
+
+The script creates `<id>/plugin.json`, `<id>/plugin.py`, and `<id>/test_<id>.py`, then automatically rebuilds `plugins.json`.
+
+After scaffolding, edit `plugin.py` to fill in `instance_config_schema` and your business logic.
+
+---
+
 1. **Read the format specification**: [PLUGIN_PACKAGE_FORMAT.md](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md)
 2. **Review the development guide**: [PLUGIN_DEVELOPMENT.md](../calvin/docs/PLUGIN_DEVELOPMENT.md)
 3. **Look at examples**: Check existing plugins in this repository
-4. **Create your plugin**: Follow the structure below
+4. **Create your plugin**: Use the scaffold script above or follow the structure below
 
 ## Plugin Structure
 

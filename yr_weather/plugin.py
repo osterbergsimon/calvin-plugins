@@ -36,14 +36,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                     "description": "Display order for service instances",
                     "default": 0,
                     "ui": {
-                        "component": "number",
-                        "help_text": (
-                            "Order for display/switching (lower numbers appear first). "
-                            "This applies to all instances of this plugin type."
-                        ),
-                        "validation": {
-                            "min": 0,
-                        },
+                        "hidden": True,
                     },
                 },
             },
@@ -125,27 +118,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "ui_actions": [
-                {
-                    "id": "geocode",
-                    "type": "custom",
-                    "label": "Get Coordinates",
-                    "style": "secondary",
-                    "endpoint": "/api/plugins/{plugin_id}/geocode",
-                },
-                {
-                    "id": "save",
-                    "type": "save",
-                    "label": "Save Settings",
-                    "style": "primary",
-                },
-                {
-                    "id": "test",
-                    "type": "test",
-                    "label": "Test Connection",
-                    "style": "secondary",
-                },
-            ],
+            "ui_actions": [],
             "display_schema": {
                 "type": "api",
                 "api_endpoint": "/api/plugins/{service_id}/data",
@@ -183,6 +156,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                 "render_template": "weather",  # Reuse the same WeatherWidget component!
             },
             "supports_multiple_instances": True,  # Multi-instance plugin
+            "instance_label": "Location",
             "plugin_class": cls,
         }
 

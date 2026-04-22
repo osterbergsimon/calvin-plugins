@@ -28,20 +28,14 @@ class MealieServicePlugin(ServicePlugin):
             "description": "Display weekly meal plan from Mealie recipe manager",
             "version": "1.0.0",
             "supports_multiple_instances": True,  # Multi-instance plugin
+            "instance_label": "Server",
             "common_config_schema": {
                 "display_order": {
                     "type": "integer",
                     "description": "Display order for service instances",
                     "default": 0,
                     "ui": {
-                        "component": "number",
-                        "help_text": (
-                            "Order for display/switching (lower numbers appear first). "
-                            "This applies to all instances of this plugin type."
-                        ),
-                        "validation": {
-                            "min": 0,
-                        },
+                        "hidden": True,
                     },
                 },
             },

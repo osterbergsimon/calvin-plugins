@@ -50,14 +50,7 @@ class WeatherServicePlugin(ServicePlugin):
                     "description": "Display order for service instances",
                     "default": 0,
                     "ui": {
-                        "component": "number",
-                        "help_text": (
-                            "Order for display/switching (lower numbers appear first). "
-                            "This applies to all instances of this plugin type."
-                        ),
-                        "validation": {
-                            "min": 0,
-                        },
+                        "hidden": True,
                     },
                 },
             },
@@ -164,6 +157,7 @@ class WeatherServicePlugin(ServicePlugin):
                 "render_template": "weather",
             },
             "supports_multiple_instances": True,  # Multi-instance plugin
+            "instance_label": "Location",
             "plugin_class": cls,
         }
 

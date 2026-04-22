@@ -42,6 +42,7 @@ class ImapBackendPlugin(BackendPlugin):
             "description": "Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share → Email.",  # noqa: E501
             "version": "1.0.0",
             "supports_multiple_instances": True,  # Multi-instance plugin
+            "instance_label": "Email Account",
             "common_config_schema": {},
             "instance_config_schema": {
                 "email_address": {
