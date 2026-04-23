@@ -87,7 +87,7 @@ class ChromecastServicePlugin(ServicePlugin):
     async def get_content(self) -> dict[str, Any]:
         return {
             "type": "chromecast",
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "config": {
                 "device_name": self.device_name,
             },
@@ -95,7 +95,7 @@ class ChromecastServicePlugin(ServicePlugin):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "device_name": self.device_name,
         }
 

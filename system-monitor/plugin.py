@@ -87,10 +87,19 @@ class SystemMonitorServicePlugin(ServicePlugin):
                         ],
                     },
                 },
+                "show_in_statusbar": {
+                    "type": "boolean",
+                    "description": "Show CPU/RAM summary in the clock bar",
+                    "default": False,
+                    "ui": {"component": "checkbox"},
+                },
             },
             "instance_config_schema": {},
             "display_schema": {
                 "component": "system_monitor/SystemMonitor.vue",
+            },
+            "statusbar_schema": {
+                "component": "system_monitor/SystemStatusbar.vue",
             },
             "plugin_class": cls,
         }
@@ -121,7 +130,7 @@ class SystemMonitorServicePlugin(ServicePlugin):
     async def get_content(self) -> dict[str, Any]:
         return {
             "type": "system_monitor",
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "config": {
                 "show_temperature": self.show_temperature,
                 "show_network": self.show_network,
@@ -131,7 +140,7 @@ class SystemMonitorServicePlugin(ServicePlugin):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "show_temperature": self.show_temperature,
             "show_network": self.show_network,
             "temp_unit": self.temp_unit,
@@ -241,6 +250,7 @@ async def handle_plugin_config_update(
             "show_temperature": extract_config_value(c, "show_temperature", default=True, converter=to_bool),
             "show_network": extract_config_value(c, "show_network", default=True, converter=to_bool),
             "temp_unit": extract_config_value(c, "temp_unit", default="C", converter=to_str),
+            "show_in_statusbar": extract_config_value(c, "show_in_statusbar", default=False, converter=to_bool),
         }
 
     manager_config = InstanceManagerConfig(

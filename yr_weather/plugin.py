@@ -9,7 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_float, to_int, to_str
+from app.plugins.utils.config import extract_config_value, to_bool, to_float, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
@@ -582,7 +582,7 @@ class YrWeatherServicePlugin(ServicePlugin):
         forecast_days = extract_config_value(config, "forecast_days", default=5, converter=to_int)
         location = extract_config_value(config, "location", default=None, converter=to_str)
         display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(config, "fullscreen", default=False)
+        fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
         if latitude is not None:
             self.latitude = round(float(latitude), 4)
@@ -623,7 +623,7 @@ def create_plugin_instance(
 
     enabled = config.get("enabled", False)  # Default to disabled
     display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False)
+    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
     # Extract config values
     latitude = extract_config_value(config, "latitude", default=59.9139, converter=to_float)
@@ -762,7 +762,7 @@ async def handle_plugin_config_update(
         forecast_days = extract_config_value(c, "forecast_days", default=5, converter=to_int)
         location = extract_config_value(c, "location", default=None, converter=to_str)
         display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(c, "fullscreen", default=False)
+        fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
 
         return {
             "latitude": latitude,
@@ -771,7 +771,7 @@ async def handle_plugin_config_update(
             "forecast_days": min(max(forecast_days or 5, 1), 9),
             "location": location,
             "display_order": display_order or 0,
-            "fullscreen": fullscreen or False,
+            "fullscreen": bool(fullscreen),
         }
 
     def validate_config(c: dict[str, Any]) -> bool:

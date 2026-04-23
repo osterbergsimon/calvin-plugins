@@ -132,7 +132,7 @@ class MealieServicePlugin(ServicePlugin):
             ],
             "display_schema": {
                 "type": "api",
-                "api_endpoint": "/api/web-services/{service_id}/data",
+                "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
                 "component": "mealie/MealPlanViewer.vue",  # Plugin-provided frontend component
                 "data_schema": {
@@ -259,7 +259,7 @@ class MealieServicePlugin(ServicePlugin):
         # The frontend will detect "mealie" type and fetch data from our API
         # This avoids CORS issues and handles authentication properly
         # Use generic /data endpoint for forward compatibility
-        meal_plan_api_url = f"/api/web-services/{self.plugin_id}/data"
+        meal_plan_api_url = f"/api/plugins/{self.plugin_id}/data"
 
         return {
             "type": "mealie",
@@ -283,7 +283,7 @@ class MealieServicePlugin(ServicePlugin):
         """
         # Store the meal plan API URL in config so web_service_service can read it
         # This points to our backend endpoint that proxies Mealie API calls
-        meal_plan_api_url = f"/api/web-services/{self.plugin_id}/data"
+        meal_plan_api_url = f"/api/plugins/{self.plugin_id}/data"
         return {
             "url": meal_plan_api_url,
             "mealie_url": self.mealie_url,
@@ -983,7 +983,6 @@ async def handle_plugin_config_update(
     return await handle_plugin_config_update_generic(
         type_id, config, enabled, db_type, session, manager_config
     )
-
 
 
 

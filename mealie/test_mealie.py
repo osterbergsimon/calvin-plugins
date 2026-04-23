@@ -178,7 +178,7 @@ class TestMealieServicePlugin:
         """Test getting service content successfully."""
         content = await mealie_plugin.get_content()
         assert content["type"] == "mealie"
-        assert content["url"] == "/api/web-services/mealie-instance/data"
+        assert content["url"] == "/api/plugins/mealie-instance/data"
         assert content["data"]["mealie_url"] == "http://mealie.local:9000"
         assert content["data"]["group_id"] is None
         assert "api_token" in content["data"]  # Token is in data but not exposed to frontend

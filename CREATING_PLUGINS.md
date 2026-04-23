@@ -147,7 +147,7 @@ class MyServicePlugin(ServicePlugin):
             },
             "display_schema": {
                 "type": "api",
-                "api_endpoint": "/api/web-services/{service_id}/data",
+                "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
             },
             "plugin_class": cls,
@@ -170,7 +170,7 @@ class MyServicePlugin(ServicePlugin):
         """Get service content for display."""
         return {
             "type": "api",
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
         }
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
