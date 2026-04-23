@@ -6,6 +6,7 @@ Works with YouTube Music, Spotify, Netflix, Plex, and any Cast-enabled app.
 """
 
 import asyncio
+import time
 from typing import Any
 
 from app.plugins.base import PluginType
@@ -111,11 +112,12 @@ class ChromecastServicePlugin(ServicePlugin):
 
     def _get_cast_status(self) -> dict[str, Any]:
         """Blocking call — runs in a thread pool via run_in_executor."""
+        browser = None
+        cast = None
         try:
             chromecasts, browser = pychromecast.get_chromecasts(
                 timeout=self.discovery_timeout
             )
-            pychromecast.discovery.stop_discovery(browser)
 
             if not chromecasts:
                 return {"state": "no_devices"}
@@ -125,7 +127,10 @@ class ChromecastServicePlugin(ServicePlugin):
                 names = [c.cast_info.friendly_name for c in chromecasts]
                 return {"state": "device_not_found", "available_devices": names}
 
-            cast.wait(timeout=3)
+            cast.wait(timeout=self.discovery_timeout)
+            cast.media_controller.update_status()
+            # Allow the Chromecast session to populate media status before reading it.
+            time.sleep(0.5)
             media = cast.media_controller.status
 
             result: dict[str, Any] = {
@@ -143,12 +148,21 @@ class ChromecastServicePlugin(ServicePlugin):
                 result["album_art_url"] = media.images[0].url if media.images else None
                 result["duration"] = media.duration
                 result["current_time"] = media.current_time
-
-            cast.disconnect()
             return result
 
         except Exception as e:
             return {"state": "error", "error": str(e)}
+        finally:
+            if browser is not None:
+                try:
+                    pychromecast.discovery.stop_discovery(browser)
+                except Exception:
+                    pass
+            if cast is not None:
+                try:
+                    cast.disconnect()
+                except Exception:
+                    pass
 
     def _pick_device(self, chromecasts: list) -> Any | None:
         if not self.device_name:

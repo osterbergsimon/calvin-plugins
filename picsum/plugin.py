@@ -14,6 +14,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 
 class PicsumImagePlugin(ImagePlugin):
@@ -71,6 +72,10 @@ class PicsumImagePlugin(ImagePlugin):
 
     async def initialize(self) -> None:
         """Initialize the plugin."""
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -219,6 +224,7 @@ class PicsumImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:

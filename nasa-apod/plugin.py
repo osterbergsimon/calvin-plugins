@@ -13,6 +13,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _APOD_URL = "https://api.nasa.gov/planetary/apod"
 _DEMO_KEY = "DEMO_KEY"
@@ -72,6 +73,11 @@ class NasaApodImagePlugin(ImagePlugin):
         self._last_scan: datetime | None = None
 
     async def initialize(self) -> None:
+        # Restore scan results from disk so a restart doesn't re-hit the API
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -152,6 +158,7 @@ class NasaApodImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:

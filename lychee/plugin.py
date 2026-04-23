@@ -14,6 +14,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _SCAN_INTERVAL = 3600  # Re-fetch album listing every hour
 
@@ -92,6 +93,10 @@ class LycheeImagePlugin(ImagePlugin):
         return f"{self.base_url}/api/v2/{path.lstrip('/')}"
 
     async def initialize(self) -> None:
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -134,6 +139,7 @@ class LycheeImagePlugin(ImagePlugin):
             photos = await self._fetch_photos()
             self._images = [self._to_image_metadata(p) for p in photos]
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, self._images)
         except httpx.HTTPStatusError as e:
             print(f"Lychee: HTTP {e.response.status_code}: {e}")
         except httpx.HTTPError as e:
