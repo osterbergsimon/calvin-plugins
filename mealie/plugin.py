@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -343,7 +344,7 @@ class MealieServicePlugin(ServicePlugin):
         # Log API token status before initializing
         token_status = "present" if self.api_token else "missing"
         token_length = len(self.api_token) if self.api_token else 0
-        print(
+        logger.debug(
             f"[Mealie] _fetch_meal_plan called - API token: {token_status} "
             f"(length: {token_length}), URL: {self.mealie_url}"
         )
@@ -392,9 +393,13 @@ class MealieServicePlugin(ServicePlugin):
 
             for endpoint, endpoint_params in endpoints_to_try:
                 try:
-                    print(f"[Mealie] Trying endpoint: {endpoint} with params: {endpoint_params}")
+                    logger.debug(
+                        f"[Mealie] Trying endpoint: {endpoint} with params: {endpoint_params}"
+                    )
                     response = await self._client.get(endpoint, params=endpoint_params)
-                    print(f"[Mealie] Response from {endpoint}: status={response.status_code}")
+                    logger.debug(
+                        f"[Mealie] Response from {endpoint}: status={response.status_code}"
+                    )
 
                     if response.status_code == 200:
                         data = response.json()
@@ -407,25 +412,25 @@ class MealieServicePlugin(ServicePlugin):
                                 if isinstance(data, list)
                                 else 0
                             )
-                            print(
+                            logger.info(
                                 f"[Mealie] Successfully fetched meal plan from {endpoint}: "
                                 f"{item_count} items"
                             )
                         elif isinstance(data, list):
-                            print(
+                            logger.info(
                                 f"[Mealie] Successfully fetched meal plan from {endpoint}: "
                                 f"{len(data)} items"
                             )
                         return data
                     elif response.status_code == 404:
                         # Try next endpoint
-                        print(f"[Mealie] Endpoint {endpoint} returned 404, trying next...")
+                        logger.debug(f"[Mealie] Endpoint {endpoint} returned 404, trying next...")
                         continue
                     else:
                         # Log non-200, non-404 responses
                         try:
                             error_body = response.text[:500]  # First 500 chars
-                            print(
+                            logger.warning(
                                 f"[Mealie] Endpoint {endpoint} returned "
                                 f"{response.status_code}: {error_body}"
                             )
@@ -434,27 +439,29 @@ class MealieServicePlugin(ServicePlugin):
                         response.raise_for_status()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:
-                        print(f"[Mealie] Endpoint {endpoint} not found (404), trying next...")
+                        logger.debug(f"[Mealie] Endpoint {endpoint} not found (404), trying next...")
                         continue
                     # Log other HTTP errors
                     try:
                         error_body = e.response.text[:500]
-                        print(
+                        logger.warning(
                             f"[Mealie] HTTP error from {endpoint}: "
                             f"{e.response.status_code} - {error_body}"
                         )
                     except Exception:
-                        print(f"[Mealie] HTTP error from {endpoint}: {e.response.status_code}")
+                        logger.warning(f"[Mealie] HTTP error from {endpoint}: {e.response.status_code}")
                     raise
                 except Exception as e:
-                    print(f"[Mealie] Unexpected error trying {endpoint}: {type(e).__name__}: {e}")
+                    logger.exception(
+                        f"[Mealie] Unexpected error trying {endpoint}: {type(e).__name__}: {e}"
+                    )
                     raise
 
             # If all endpoints failed, return empty meal plan
             tried_endpoints = [e[0] for e in endpoints_to_try]
-            print(f"[Mealie] ERROR: Could not find meal plan endpoint. Tried: {tried_endpoints}")
-            print(f"[Mealie] Date range: {today.isoformat()} to {week_end.isoformat()}")
-            print(f"[Mealie] Group ID: {self.group_id or 'not specified'}")
+            logger.error(f"[Mealie] Could not find meal plan endpoint. Tried: {tried_endpoints}")
+            logger.error(f"[Mealie] Date range: {today.isoformat()} to {week_end.isoformat()}")
+            logger.error(f"[Mealie] Group ID: {self.group_id or 'not specified'}")
             return {
                 "items": [],
                 "start_date": today.isoformat(),
@@ -472,7 +479,7 @@ class MealieServicePlugin(ServicePlugin):
                 # Log response body for debugging (may contain useful error info)
                 try:
                     response_body = e.response.text
-                    print(f"[Mealie] 401 response body: {response_body[:500]}")  # First 500 chars
+                    logger.debug(f"[Mealie] 401 response body: {response_body[:500]}")
                 except Exception:
                     pass
             elif e.response.status_code == 403:
@@ -482,7 +489,7 @@ class MealieServicePlugin(ServicePlugin):
                 )
                 try:
                     response_body = e.response.text
-                    print(f"[Mealie] 403 response body: {response_body[:500]}")
+                    logger.debug(f"[Mealie] 403 response body: {response_body[:500]}")
                 except Exception:
                     pass
             elif e.response.status_code == 404:
@@ -494,37 +501,37 @@ class MealieServicePlugin(ServicePlugin):
                 # Log response body for other errors
                 try:
                     response_body = e.response.text
-                    print(f"[Mealie] {e.response.status_code} response body: {response_body[:500]}")
+                    logger.debug(
+                        f"[Mealie] {e.response.status_code} response body: {response_body[:500]}"
+                    )
                 except Exception:
                     pass
 
-            print(f"[Mealie] HTTP error fetching meal plan: {e.response.status_code}")
-            print(f"[Mealie] Request URL: {e.request.url}")
-            print(f"[Mealie] Request method: {e.request.method}")
+            logger.error(f"[Mealie] HTTP error fetching meal plan: {e.response.status_code}")
+            logger.error(f"[Mealie] Request URL: {e.request.url}")
+            logger.error(f"[Mealie] Request method: {e.request.method}")
             # Log token status (without exposing the actual token)
             token_status = "present" if self.api_token else "missing"
             token_length = len(self.api_token) if self.api_token else 0
-            print(f"[Mealie] API token status: {token_status} (length: {token_length})")
-            print(f"[Mealie] Mealie URL: {self.mealie_url}")
+            logger.error(f"[Mealie] API token status: {token_status} (length: {token_length})")
+            logger.error(f"[Mealie] Mealie URL: {self.mealie_url}")
             return {
                 "items": [],
                 "error": error_detail,
             }
         except httpx.HTTPError as e:
-            print(f"[Mealie] Network/HTTP error fetching meal plan: {type(e).__name__}: {e}")
-            print(f"[Mealie] Mealie URL: {self.mealie_url}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(
+                f"[Mealie] Network/HTTP error fetching meal plan: {type(e).__name__}: {e}"
+            )
+            logger.error(f"[Mealie] Mealie URL: {self.mealie_url}")
             return {
                 "items": [],
                 "error": f"Network error: {str(e)}",
             }
         except Exception as e:
-            print(f"[Mealie] Unexpected error fetching meal plan: {type(e).__name__}: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(
+                f"[Mealie] Unexpected error fetching meal plan: {type(e).__name__}: {e}"
+            )
             return {
                 "items": [],
                 "error": f"Unexpected error: {str(e)}",
@@ -599,24 +606,22 @@ class MealieServicePlugin(ServicePlugin):
         Reload plugin config from database to ensure we have the latest values,
         especially the API token which might have been updated.
         """
-        import traceback
-
         from app.models.db_models import PluginDB
 
         try:
-            print(f"[Mealie] Reloading config from DB for plugin_id: {self.plugin_id}")
+            logger.debug(f"[Mealie] Reloading config from DB for plugin_id: {self.plugin_id}")
             db_plugin = await PluginDB.objects.get_or_none(id=self.plugin_id)
 
             if not db_plugin:
-                print(f"[Mealie] WARNING: Plugin {self.plugin_id} not found in database")
+                logger.warning(f"[Mealie] Plugin {self.plugin_id} not found in database")
                 return
 
             if not db_plugin.config:
-                print(f"[Mealie] WARNING: Plugin {self.plugin_id} has no config in database")
+                logger.warning(f"[Mealie] Plugin {self.plugin_id} has no config in database")
                 return
 
             config = db_plugin.config
-            print(f"[Mealie] Found config in DB with keys: {list(config.keys())}")
+            logger.debug(f"[Mealie] Found config in DB with keys: {list(config.keys())}")
 
             # Check if API token has changed
             new_api_token = config.get("api_token", "")
@@ -626,30 +631,28 @@ class MealieServicePlugin(ServicePlugin):
 
             current_token_length = len(self.api_token) if self.api_token else 0
             new_token_length = len(new_api_token) if new_api_token else 0
-            print(
+            logger.debug(
                 f"[Mealie] Token comparison - current: {current_token_length} chars, "
                 f"new: {new_token_length} chars"
             )
 
             # Only reconfigure if API token has changed or is missing
             if new_api_token and new_api_token != self.api_token:
-                print(
+                logger.info(
                     f"[Mealie] API token changed, reloading config from database "
                     f"(old length: {len(self.api_token)}, new length: {len(new_api_token)})"
                 )
                 await self.configure(config)
             elif not self.api_token and new_api_token:
-                print(
+                logger.info(
                     f"[Mealie] API token was missing, reloading config from database "
                     f"(new length: {len(new_api_token)})"
                 )
                 await self.configure(config)
             else:
-                print("[Mealie] API token unchanged, no reload needed")
+                logger.debug("[Mealie] API token unchanged, no reload needed")
         except Exception as e:
-            print(f"[Mealie] ERROR reloading config from database: {e}")
-            print("[Mealie] Traceback:")
-            traceback.print_exc()
+            logger.exception(f"[Mealie] Error reloading config from database: {e}")
             # Don't fail the request if we can't reload config
             # The existing config might still work
 
@@ -726,7 +729,7 @@ async def test_plugin_connection(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             # Test 1: Verify API token by checking user info
-            print(f"[Mealie Test] Testing connection to {mealie_url}...")
+            logger.info(f"[Mealie Test] Testing connection to {mealie_url}...")
             try:
                 response = await client.get(
                     f"{mealie_url}/api/users/self",
@@ -737,7 +740,7 @@ async def test_plugin_connection(
                     user_id = user_data.get("id", "unknown")
                     username = user_data.get("username", "unknown")
                     test_results.append(f"✓ Authentication successful (user: {username})")
-                    print(f"[Mealie Test] User authenticated: {username} (ID: {user_id})")
+                    logger.info(f"[Mealie Test] User authenticated: {username} (ID: {user_id})")
                 elif response.status_code == 401:
                     return {
                         "success": False,
@@ -760,7 +763,7 @@ async def test_plugin_connection(
                 }
 
             # Test 2: Verify access to meal plans endpoint
-            print("[Mealie Test] Testing meal plan access...")
+            logger.info("[Mealie Test] Testing meal plan access...")
             from datetime import datetime, timedelta
 
             today = datetime.now().date()
@@ -799,7 +802,7 @@ async def test_plugin_connection(
                             f"✓ Meal plan access successful "
                             f"({endpoint}: {item_count} items found)"
                         )
-                        print(
+                        logger.info(
                             f"[Mealie Test] Meal plan endpoint {endpoint} accessible: "
                             f"{item_count} items"
                         )
@@ -810,13 +813,13 @@ async def test_plugin_connection(
                         test_results.append(
                             "⚠ Meal plan endpoint accessible but permission denied (403)"
                         )
-                        print(
+                        logger.warning(
                             f"[Mealie Test] Meal plan endpoint {endpoint} returned 403 "
                             "(permission denied)"
                         )
                         break
                     else:
-                        print(
+                        logger.warning(
                             f"[Mealie Test] Meal plan endpoint {endpoint} returned "
                             f"{response.status_code}"
                         )
@@ -827,10 +830,10 @@ async def test_plugin_connection(
                         test_results.append(
                             "⚠ Meal plan endpoint accessible but permission denied (403)"
                         )
-                        print(f"[Mealie Test] Meal plan endpoint {endpoint} returned 403")
+                        logger.warning(f"[Mealie Test] Meal plan endpoint {endpoint} returned 403")
                         break
                     else:
-                        print(
+                        logger.warning(
                             f"[Mealie Test] Meal plan endpoint {endpoint} error: "
                             f"{e.response.status_code}"
                         )
@@ -850,7 +853,7 @@ async def test_plugin_connection(
                 )
                 if response.status_code == 200:
                     test_results.append("✓ Recipes API accessible")
-                    print("[Mealie Test] Recipes endpoint accessible")
+                    logger.info("[Mealie Test] Recipes endpoint accessible")
             except Exception:
                 pass  # Not critical for meal plan functionality
 
@@ -887,10 +890,7 @@ async def test_plugin_connection(
             "message": f"Connection to {mealie_url} timed out. Please check the URL and network.",
         }
     except Exception as e:
-        import traceback
-
-        print(f"[Mealie Test] Unexpected error: {e}")
-        traceback.print_exc()
+        logger.exception(f"[Mealie Test] Unexpected error: {e}")
         return {
             "success": False,
             "message": f"Error: {str(e)}",
@@ -908,10 +908,6 @@ async def handle_plugin_config_update(
     """Handle Mealie plugin configuration update and instance management."""
     if type_id != "mealie":
         return None
-
-    import logging
-
-    logger = logging.getLogger(__name__)
 
     def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
         """Normalize config values."""
@@ -983,6 +979,4 @@ async def handle_plugin_config_update(
     return await handle_plugin_config_update_generic(
         type_id, config, enabled, db_type, session, manager_config
     )
-
-
 

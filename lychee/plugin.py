@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -123,7 +124,7 @@ class LycheeImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"Lychee: error fetching image data: {e}")
+                logger.warning(f"[Lychee] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -141,11 +142,11 @@ class LycheeImagePlugin(ImagePlugin):
             self._last_scan = datetime.now()
             save_scan_cache(self.plugin_id, self._images)
         except httpx.HTTPStatusError as e:
-            print(f"Lychee: HTTP {e.response.status_code}: {e}")
+            logger.warning(f"[Lychee] HTTP {e.response.status_code}: {e}")
         except httpx.HTTPError as e:
-            print(f"Lychee: request error: {e}")
+            logger.warning(f"[Lychee] Request error: {e}")
         except Exception as e:
-            print(f"Lychee: unexpected error: {e}")
+            logger.exception(f"[Lychee] Unexpected error scanning images: {e}")
 
         return self._images.copy()
 

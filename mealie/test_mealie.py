@@ -67,7 +67,8 @@ class TestMealieServicePlugin:
         assert metadata["type_id"] == "mealie"
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["name"] == "Mealie Meal Plan"
-        assert metadata["supports_multiple_instances"] is False
+        assert metadata["supports_multiple_instances"] is True
+        assert metadata["instance_label"] == "Server"
         assert "common_config_schema" in metadata
         assert "instance_config_schema" in metadata
         assert "mealie_url" in metadata["instance_config_schema"]

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -104,7 +105,7 @@ class NasaApodImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"NASA APOD: error fetching image data: {e}")
+                logger.warning(f"[NASA APOD] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -162,13 +163,13 @@ class NasaApodImagePlugin(ImagePlugin):
             return images
 
         except httpx.HTTPStatusError as e:
-            print(f"NASA APOD: HTTP error {e.response.status_code}: {e}")
+            logger.warning(f"[NASA APOD] HTTP error {e.response.status_code}: {e}")
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"NASA APOD: request error: {e}")
+            logger.warning(f"[NASA APOD] Request error: {e}")
             return self._images.copy()
         except Exception as e:
-            print(f"NASA APOD: unexpected error: {e}")
+            logger.exception(f"[NASA APOD] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:

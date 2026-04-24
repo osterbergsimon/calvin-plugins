@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -165,7 +166,7 @@ class UnsplashImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"Error fetching image from Unsplash: {e}")
+                logger.warning(f"[Unsplash] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -201,7 +202,9 @@ class UnsplashImagePlugin(ImagePlugin):
             else:
                 # Without API key, we'll get rate limited quickly
                 # For testing, we can use a demo access key or just handle errors gracefully
-                print("Warning: Unsplash plugin used without API key. Rate limits will apply.")
+                logger.warning(
+                    "[Unsplash] Plugin used without API key. Rate limits will apply."
+                )
                 # Try to use demo access (this may not work without proper setup)
                 # In production, users should provide their own API key
 
@@ -258,24 +261,23 @@ class UnsplashImagePlugin(ImagePlugin):
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                print(
+                logger.error(
                     "Error: Unsplash API requires authentication. Please provide an API key in plugin settings."  # noqa: E501
                 )
             elif e.response.status_code == 403:
-                print("Error: Unsplash API access forbidden. Check your API key.")
+                logger.error("[Unsplash] API access forbidden. Check your API key.")
             else:
-                print(f"HTTP error fetching photos from Unsplash: {e.response.status_code} - {e}")
+                logger.warning(
+                    f"[Unsplash] HTTP error fetching photos: {e.response.status_code} - {e}"
+                )
             # Return cached images if available
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"Error fetching photos from Unsplash: {e}")
+            logger.warning(f"[Unsplash] Request error fetching photos: {e}")
             # Return cached images if available
             return self._images.copy()
         except Exception as e:
-            print(f"Unexpected error in Unsplash plugin: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(f"[Unsplash] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
