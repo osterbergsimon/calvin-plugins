@@ -22,13 +22,15 @@ try:
         InstanceManagerConfig,
         handle_plugin_config_update_generic,
     )
-    
+
     # Import the plugin
     import sys
     from pathlib import Path
+
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("mealie_plugin", plugin_path)
         if spec and spec.loader:
             mealie_module = importlib.util.module_from_spec(spec)
@@ -67,7 +69,8 @@ class TestMealieServicePlugin:
         assert metadata["type_id"] == "mealie"
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["name"] == "Mealie Meal Plan"
-        assert metadata["supports_multiple_instances"] is False
+        assert metadata["supports_multiple_instances"] is True
+        assert metadata["instance_label"] == "Server"
         assert "common_config_schema" in metadata
         assert "instance_config_schema" in metadata
         assert "mealie_url" in metadata["instance_config_schema"]
@@ -162,7 +165,7 @@ class TestMealieServicePlugin:
         """Test plugin cleanup."""
         await mealie_plugin.initialize()
         assert mealie_plugin._client is not None
-        
+
         await mealie_plugin.cleanup()
         assert mealie_plugin._client is None
 
@@ -178,7 +181,7 @@ class TestMealieServicePlugin:
         """Test getting service content successfully."""
         content = await mealie_plugin.get_content()
         assert content["type"] == "mealie"
-        assert content["url"] == "/api/web-services/mealie-instance/data"
+        assert content["url"] == "/api/plugins/mealie-instance/data"
         assert content["data"]["mealie_url"] == "http://mealie.local:9000"
         assert content["data"]["group_id"] is None
         assert "api_token" in content["data"]  # Token is in data but not exposed to frontend
@@ -227,70 +230,122 @@ class TestMealieServicePlugin:
     @pytest.mark.asyncio
     async def test_validate_config_valid(self, mealie_plugin):
         """Test config validation with valid config."""
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "http://mealie.local:9000",
-            "api_token": "test-token",
-        }) is True
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "http://mealie.local:9000",
+                    "api_token": "test-token",
+                }
+            )
+            is True
+        )
 
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "https://mealie.example.com",
-            "api_token": "test-token",
-            "days_ahead": 14,
-        }) is True
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "https://mealie.example.com",
+                    "api_token": "test-token",
+                    "days_ahead": 14,
+                }
+            )
+            is True
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_url(self, mealie_plugin):
         """Test config validation with missing URL."""
         assert await mealie_plugin.validate_config({"api_token": "test-token"}) is False
-        assert await mealie_plugin.validate_config({"mealie_url": "", "api_token": "test-token"}) is False
+        assert (
+            await mealie_plugin.validate_config({"mealie_url": "", "api_token": "test-token"})
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_token(self, mealie_plugin):
         """Test config validation with missing token."""
-        assert await mealie_plugin.validate_config({"mealie_url": "http://mealie.local:9000"}) is False
-        assert await mealie_plugin.validate_config({"mealie_url": "http://mealie.local:9000", "api_token": ""}) is False
+        assert (
+            await mealie_plugin.validate_config({"mealie_url": "http://mealie.local:9000"}) is False
+        )
+        assert (
+            await mealie_plugin.validate_config(
+                {"mealie_url": "http://mealie.local:9000", "api_token": ""}
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_invalid_url(self, mealie_plugin):
         """Test config validation with invalid URL."""
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "not-a-url",
-            "api_token": "test-token",
-        }) is False
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "not-a-url",
+                    "api_token": "test-token",
+                }
+            )
+            is False
+        )
 
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "ftp://mealie.local",
-            "api_token": "test-token",
-        }) is False
+    @pytest.mark.asyncio
+    async def test_test_type_config_requires_url_and_token(self):
+        result = await MealieServicePlugin.test_type_config({})
+        assert result["success"] is False
+        assert "required" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_validate_config_invalid_scheme(self, mealie_plugin):
+        """Test config validation with unsupported URL scheme."""
+
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "ftp://mealie.local",
+                    "api_token": "test-token",
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_invalid_days_ahead(self, mealie_plugin):
         """Test config validation with invalid days_ahead."""
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "http://mealie.local:9000",
-            "api_token": "test-token",
-            "days_ahead": 0,
-        }) is False
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "http://mealie.local:9000",
+                    "api_token": "test-token",
+                    "days_ahead": 0,
+                }
+            )
+            is False
+        )
 
-        assert await mealie_plugin.validate_config({
-            "mealie_url": "http://mealie.local:9000",
-            "api_token": "test-token",
-            "days_ahead": 31,
-        }) is False
+        assert (
+            await mealie_plugin.validate_config(
+                {
+                    "mealie_url": "http://mealie.local:9000",
+                    "api_token": "test-token",
+                    "days_ahead": 31,
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_configure(self, mealie_plugin):
         """Test plugin configuration."""
         await mealie_plugin.initialize()
-        
-        await mealie_plugin.configure({
-            "mealie_url": "http://new-mealie.local:9000",
-            "api_token": "new-token",
-            "group_id": "new-group",
-            "days_ahead": 14,
-            "display_order": 5,
-            "fullscreen": True,
-        })
+
+        await mealie_plugin.configure(
+            {
+                "mealie_url": "http://new-mealie.local:9000",
+                "api_token": "new-token",
+                "group_id": "new-group",
+                "days_ahead": 14,
+                "display_order": 5,
+                "fullscreen": True,
+            }
+        )
 
         assert mealie_plugin.mealie_url == "http://new-mealie.local:9000"
         assert mealie_plugin.api_token == "new-token"
@@ -302,20 +357,24 @@ class TestMealieServicePlugin:
     @pytest.mark.asyncio
     async def test_configure_url_rstrip(self, mealie_plugin):
         """Test that configure strips trailing slashes from URL."""
-        await mealie_plugin.configure({
-            "mealie_url": "http://mealie.local:9000/",
-            "api_token": "test-token",
-        })
+        await mealie_plugin.configure(
+            {
+                "mealie_url": "http://mealie.local:9000/",
+                "api_token": "test-token",
+            }
+        )
         assert mealie_plugin.mealie_url == "http://mealie.local:9000"
 
     @pytest.mark.asyncio
     async def test_configure_empty_group_id(self, mealie_plugin):
         """Test that empty group_id becomes None."""
-        await mealie_plugin.configure({
-            "mealie_url": "http://mealie.local:9000",
-            "api_token": "test-token",
-            "group_id": "",
-        })
+        await mealie_plugin.configure(
+            {
+                "mealie_url": "http://mealie.local:9000",
+                "api_token": "test-token",
+                "group_id": "",
+            }
+        )
         assert mealie_plugin.group_id is None
 
     @pytest.mark.asyncio
@@ -323,9 +382,9 @@ class TestMealieServicePlugin:
         """Test configuring with partial config."""
         await mealie_plugin.initialize()
         original_url = mealie_plugin.mealie_url
-        
+
         await mealie_plugin.configure({"days_ahead": 10})
-        
+
         # URL should remain unchanged
         assert mealie_plugin.mealie_url == original_url
         assert mealie_plugin.days_ahead == 10
@@ -343,15 +402,17 @@ class TestMealiePluginHooks:
 
     async def test_handle_plugin_config_update(self):
         """Test handle_plugin_config_update hook.
-        
+
         Note: This test is skipped when run from the plugin directory because it requires
         the `test_db` fixture which is only available in the backend test suite.
-        
+
         To test handle_plugin_config_update hooks, run the backend test suite from the
         backend directory:
             cd backend
             pytest tests/unit/test_plugin_hooks.py
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
-                   "Run from backend directory: "
-                   "cd backend && pytest tests/unit/test_plugin_hooks.py")
+        pytest.skip(
+            "Requires backend test fixtures (test_db). "
+            "Run from backend directory: "
+            "cd backend && pytest tests/unit/test_plugin_hooks.py"
+        )

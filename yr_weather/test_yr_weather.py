@@ -13,13 +13,15 @@ import pytest
 # In a real scenario, you'd run these tests in the calvin backend context
 try:
     from app.plugins.base import PluginType
-    
+
     # Import the plugin
     import sys
     from pathlib import Path
+
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("yr_weather_plugin", plugin_path)
         if spec and spec.loader:
             yr_weather_module = importlib.util.module_from_spec(spec)
@@ -113,7 +115,10 @@ class TestYrWeatherServicePlugin:
         await yr_weather_plugin.initialize()
         assert yr_weather_plugin._client is not None
         # base_url is an httpx.URL object, convert to string for comparison
-        assert str(yr_weather_plugin._client.base_url).rstrip("/") == "https://api.met.no/weatherapi/locationforecast/2.0"
+        assert (
+            str(yr_weather_plugin._client.base_url).rstrip("/")
+            == "https://api.met.no/weatherapi/locationforecast/2.0"
+        )
 
     @pytest.mark.asyncio
     async def test_initialize_invalid_latitude(self):
@@ -150,60 +155,86 @@ class TestYrWeatherServicePlugin:
     @pytest.mark.asyncio
     async def test_validate_config_valid(self, yr_weather_plugin):
         """Test config validation with valid config."""
-        assert await yr_weather_plugin.validate_config({
-            "latitude": 59.9139,
-            "longitude": 10.7522,
-        }) is True
+        assert (
+            await yr_weather_plugin.validate_config(
+                {
+                    "latitude": 59.9139,
+                    "longitude": 10.7522,
+                }
+            )
+            is True
+        )
 
-        assert await yr_weather_plugin.validate_config({
-            "latitude": "59.9139",
-            "longitude": "10.7522",
-        }) is True
+        assert (
+            await yr_weather_plugin.validate_config(
+                {
+                    "latitude": "59.9139",
+                    "longitude": "10.7522",
+                }
+            )
+            is True
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_latitude(self, yr_weather_plugin):
         """Test config validation with missing latitude."""
         # Missing key should return None from extract_config_value
-        result = await yr_weather_plugin.validate_config({
-            "longitude": 10.7522,
-        })
+        result = await yr_weather_plugin.validate_config(
+            {
+                "longitude": 10.7522,
+            }
+        )
         assert result is False
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_longitude(self, yr_weather_plugin):
         """Test config validation with missing longitude."""
         # Missing key should return None from extract_config_value
-        result = await yr_weather_plugin.validate_config({
-            "latitude": 59.9139,
-        })
+        result = await yr_weather_plugin.validate_config(
+            {
+                "latitude": 59.9139,
+            }
+        )
         assert result is False
 
     @pytest.mark.asyncio
     async def test_validate_config_invalid_coordinates(self, yr_weather_plugin):
         """Test config validation with invalid coordinates."""
-        assert await yr_weather_plugin.validate_config({
-            "latitude": 100,  # Invalid
-            "longitude": 10.7522,
-        }) is False
+        assert (
+            await yr_weather_plugin.validate_config(
+                {
+                    "latitude": 100,  # Invalid
+                    "longitude": 10.7522,
+                }
+            )
+            is False
+        )
 
-        assert await yr_weather_plugin.validate_config({
-            "latitude": 59.9139,
-            "longitude": 200,  # Invalid
-        }) is False
+        assert (
+            await yr_weather_plugin.validate_config(
+                {
+                    "latitude": 59.9139,
+                    "longitude": 200,  # Invalid
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_configure(self, yr_weather_plugin):
         """Test plugin configuration."""
         await yr_weather_plugin.initialize()
-        
+
         with patch.object(yr_weather_plugin, "is_running", return_value=False):
-            await yr_weather_plugin.configure({
-                "latitude": 60.1699,
-                "longitude": 24.9384,
-                "altitude": 10,
-                "forecast_days": 7,
-                "location": "Helsinki, Finland",
-            })
+            await yr_weather_plugin.configure(
+                {
+                    "latitude": 60.1699,
+                    "longitude": 24.9384,
+                    "altitude": 10,
+                    "forecast_days": 7,
+                    "location": "Helsinki, Finland",
+                }
+            )
 
             assert yr_weather_plugin.latitude == 60.1699
             assert yr_weather_plugin.longitude == 24.9384
@@ -215,7 +246,7 @@ class TestYrWeatherServicePlugin:
     async def test_configure_forecast_days_clamping(self, yr_weather_plugin):
         """Test that forecast_days is clamped during configure."""
         await yr_weather_plugin.initialize()
-        
+
         with patch.object(yr_weather_plugin, "is_running", return_value=False):
             # Too large
             await yr_weather_plugin.configure({"forecast_days": 15})
@@ -235,18 +266,30 @@ class TestYrWeatherServicePlugin:
         assert content["data"]["latitude"] == 59.9139
         assert content["data"]["longitude"] == 10.7522
 
+    @pytest.mark.asyncio
+    async def test_test_type_config_invalid_coordinates(self):
+        result = await YrWeatherServicePlugin.test_type_config(
+            {"latitude": 100, "longitude": 10.7522}
+        )
+        assert result["success"] is False
+        assert "invalid coordinates" in result["message"].lower()
+
 
 @pytest.mark.asyncio
 class TestYrWeatherPluginHooks:
     """Tests for Yr.no Weather plugin hooks."""
 
-    @pytest.mark.skip(reason="Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead.")
+    @pytest.mark.skip(
+        reason="Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead."
+    )
     async def test_handle_plugin_config_update(self, test_db):
         """Test handle_plugin_config_update hook.
-        
-        Note: This test requires backend fixtures (test_db). 
+
+        Note: This test requires backend fixtures (test_db).
         Run the hook integration test from backend/tests/unit/test_plugin_hooks.py instead:
-        
+
             pytest backend/tests/unit/test_plugin_hooks.py::TestPluginHooks::test_yr_weather_handle_plugin_config_update
         """
-        pytest.skip("Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead.")
+        pytest.skip(
+            "Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead."
+        )

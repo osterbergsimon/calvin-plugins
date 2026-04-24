@@ -9,7 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_str, to_int
+from app.plugins.utils.config import extract_config_value, to_bool, to_str, to_int
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
@@ -105,6 +105,15 @@ class WeatherServicePlugin(ServicePlugin):
                         "help_text": "Open this service in fullscreen by default",
                     },
                 },
+                "show_in_statusbar": {
+                    "type": "boolean",
+                    "description": "Show temperature in the clock bar",
+                    "default": False,
+                    "ui": {
+                        "component": "checkbox",
+                        "help_text": "Display current temperature next to the clock",
+                    },
+                },
             },
             "ui_actions": [
                 {
@@ -155,6 +164,9 @@ class WeatherServicePlugin(ServicePlugin):
                     "units": {"type": "string"},
                 },
                 "render_template": "weather",
+            },
+            "statusbar_schema": {
+                "component": "weather/WeatherStatusbar.vue",
             },
             "supports_multiple_instances": True,  # Multi-instance plugin
             "instance_label": "Location",
@@ -409,6 +421,95 @@ class WeatherServicePlugin(ServicePlugin):
 
         return True
 
+    @classmethod
+    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Test OpenWeatherMap connectivity for the configured location."""
+        api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+        location = extract_config_value(config, "location", default="", converter=to_str)
+        units = extract_config_value(config, "units", default="metric", converter=to_str)
+
+        api_key = api_key.strip() if api_key else ""
+        location = location.strip() if location else ""
+        units = units.strip() if units else "metric"
+
+        if not api_key or not location:
+            return {
+                "success": False,
+                "message": "OpenWeatherMap API key and location are required.",
+            }
+
+        try:
+            async with httpx.AsyncClient(
+                base_url="https://api.openweathermap.org/data/2.5",
+                timeout=10.0,
+            ) as client:
+                response = await client.get(
+                    "/weather",
+                    params={
+                        "q": location,
+                        "appid": api_key,
+                        "units": units,
+                    },
+                )
+
+            if response.status_code == 200:
+                data = response.json()
+                location_name = data.get("name", location)
+                country = data.get("sys", {}).get("country", "")
+                resolved_location = f"{location_name}, {country}" if country else location_name
+                description = data.get("weather", [{}])[0].get("description", "unknown conditions")
+                temperature = data.get("main", {}).get("temp")
+                temp_suffix = (
+                    f" Current temperature: {round(temperature)}°."
+                    if temperature is not None
+                    else ""
+                )
+                return {
+                    "success": True,
+                    "message": (
+                        f"Connected successfully. Resolved location: {resolved_location}. "
+                        f"Weather: {description}.{temp_suffix}"
+                    ),
+                }
+
+            if response.status_code == 401:
+                return {
+                    "success": False,
+                    "message": "Authentication failed. Check your OpenWeatherMap API key.",
+                }
+
+            if response.status_code == 404:
+                return {
+                    "success": False,
+                    "message": f"Location '{location}' was not found by OpenWeatherMap.",
+                }
+
+            return {
+                "success": False,
+                "message": f"OpenWeatherMap returned status {response.status_code}.",
+            }
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "message": "Connection to OpenWeatherMap timed out.",
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "Could not connect to OpenWeatherMap.",
+            }
+        except httpx.HTTPError as e:
+            return {
+                "success": False,
+                "message": f"Network error: {str(e)}",
+            }
+        except Exception as e:
+            logger.exception("Unexpected error testing weather plugin connection")
+            return {
+                "success": False,
+                "message": f"Error: {str(e)}",
+            }
+
     async def configure(self, config: dict[str, Any]) -> None:
         """
         Configure the plugin with new settings.
@@ -427,7 +528,7 @@ class WeatherServicePlugin(ServicePlugin):
         units = extract_config_value(config, "units", default="metric", converter=to_str)
         forecast_days = extract_config_value(config, "forecast_days", default=3, converter=to_int)
         display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(config, "fullscreen", default=False)
+        fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
         if api_key is not None:
             self.api_key = str(api_key).strip()
@@ -466,7 +567,7 @@ def create_plugin_instance(
 
     enabled = config.get("enabled", False)  # Default to disabled
     display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False)
+    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
     # Extract config values
     api_key = extract_config_value(config, "api_key", default="", converter=to_str)
@@ -512,15 +613,19 @@ async def handle_plugin_config_update(
         units = extract_config_value(c, "units", default="metric", converter=to_str)
         forecast_days = extract_config_value(c, "forecast_days", default=3, converter=to_int)
         display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(c, "fullscreen", default=False)
+        fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
 
+        show_in_statusbar = extract_config_value(
+            c, "show_in_statusbar", default=False, converter=to_bool
+        )
         return {
             "api_key": str(api_key).strip() if api_key else "",
             "location": str(location).strip() if location else "",
             "units": str(units).strip() if units else "metric",
             "forecast_days": min(max(int(forecast_days), 1), 5) if forecast_days else 3,
             "display_order": display_order or 0,
-            "fullscreen": fullscreen or False,
+            "fullscreen": bool(fullscreen),
+            "show_in_statusbar": bool(show_in_statusbar),
         }
 
     def validate_config(c: dict[str, Any]) -> bool:

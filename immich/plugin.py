@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -13,6 +14,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _SCAN_INTERVAL = 3600  # Refresh once per hour
 
@@ -104,6 +106,10 @@ class ImmichImagePlugin(ImagePlugin):
         return f"{self.base_url}/api/{path.lstrip('/')}"
 
     async def initialize(self) -> None:
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -127,7 +133,7 @@ class ImmichImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"Immich: error fetching image data: {e}")
+                logger.warning(f"[Immich] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -143,12 +149,13 @@ class ImmichImagePlugin(ImagePlugin):
             assets = await self._fetch_assets()
             self._images = [self._to_image_metadata(a) for a in assets if a.get("type") == "IMAGE"]
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, self._images)
         except httpx.HTTPStatusError as e:
-            print(f"Immich: HTTP {e.response.status_code}: {e}")
+            logger.warning(f"[Immich] HTTP {e.response.status_code}: {e}")
         except httpx.HTTPError as e:
-            print(f"Immich: request error: {e}")
+            logger.warning(f"[Immich] Request error: {e}")
         except Exception as e:
-            print(f"Immich: unexpected error: {e}")
+            logger.exception(f"[Immich] Unexpected error scanning images: {e}")
 
         return self._images.copy()
 

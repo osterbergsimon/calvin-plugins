@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -14,6 +15,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 
 class PicsumImagePlugin(ImagePlugin):
@@ -71,6 +73,10 @@ class PicsumImagePlugin(ImagePlugin):
 
     async def initialize(self) -> None:
         """Initialize the plugin."""
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -128,7 +134,7 @@ class PicsumImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"Error fetching image from Picsum: {e}")
+                logger.warning(f"[Picsum] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -219,21 +225,21 @@ class PicsumImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:
-            print(f"HTTP error fetching photos from Picsum: {e.response.status_code} - {e}")
+            logger.warning(
+                f"[Picsum] HTTP error fetching photos: {e.response.status_code} - {e}"
+            )
             # Return cached images if available
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"Error fetching photos from Picsum: {e}")
+            logger.warning(f"[Picsum] Request error fetching photos: {e}")
             # Return cached images if available
             return self._images.copy()
         except Exception as e:
-            print(f"Unexpected error in Picsum plugin: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(f"[Picsum] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:

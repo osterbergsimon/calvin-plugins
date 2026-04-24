@@ -19,7 +19,8 @@
     "include": [
       "plugin.py",
       "plugin.json",
-      "frontend/SystemMonitor.vue"
+      "frontend/SystemMonitor.vue",
+      "frontend/SystemStatusbar.vue"
     ],
     "exclude": [
       "*.md",

@@ -9,7 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_float, to_int, to_str
+from app.plugins.utils.config import extract_config_value, to_bool, to_float, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
@@ -563,6 +563,81 @@ class YrWeatherServicePlugin(ServicePlugin):
 
         return True
 
+    @classmethod
+    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Test Yr.no weather API connection."""
+        latitude = extract_config_value(config, "latitude", converter=to_float)
+        longitude = extract_config_value(config, "longitude", converter=to_float)
+
+        if latitude is None or longitude is None:
+            return {
+                "success": False,
+                "message": "Latitude and longitude are required. Use 'Get Coordinates' to find them.",
+            }
+
+        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+            return {
+                "success": False,
+                "message": "Invalid coordinates. Latitude must be between -90 and 90, longitude between -180 and 180.",
+            }
+
+        latitude = round(latitude, 4)
+        longitude = round(longitude, 4)
+
+        try:
+            headers = {
+                "User-Agent": "Calvin-Dashboard/1.0 (https://github.com/osterbergsimon/calvin)",
+            }
+            params = {"lat": latitude, "lon": longitude}
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    "https://api.met.no/weatherapi/locationforecast/2.0/compact",
+                    params=params,
+                    headers=headers,
+                )
+
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("properties") and data.get("properties", {}).get("timeseries"):
+                    return {
+                        "success": True,
+                        "message": f"Successfully connected to Yr.no API. Weather data available for coordinates ({latitude}, {longitude}).",
+                    }
+                return {
+                    "success": False,
+                    "message": "Connected to Yr.no API but received invalid data format.",
+                }
+            if response.status_code == 422:
+                return {
+                    "success": False,
+                    "message": f"Location ({latitude}, {longitude}) is not covered by Yr.no weather service. Please try different coordinates.",
+                }
+            return {
+                "success": False,
+                "message": f"Yr.no API returned status {response.status_code}. Please check your coordinates.",
+            }
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "message": "Connection to Yr.no API timed out. Please check your internet connection.",
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "Could not connect to Yr.no API. Please check your internet connection.",
+            }
+        except httpx.HTTPError as e:
+            return {
+                "success": False,
+                "message": f"Network error: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error: {str(e)}",
+            }
+
     async def configure(self, config: dict[str, Any]) -> None:
         """
         Configure the plugin with new settings.
@@ -582,7 +657,7 @@ class YrWeatherServicePlugin(ServicePlugin):
         forecast_days = extract_config_value(config, "forecast_days", default=5, converter=to_int)
         location = extract_config_value(config, "location", default=None, converter=to_str)
         display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(config, "fullscreen", default=False)
+        fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
         if latitude is not None:
             self.latitude = round(float(latitude), 4)
@@ -623,7 +698,7 @@ def create_plugin_instance(
 
     enabled = config.get("enabled", False)  # Default to disabled
     display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False)
+    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
 
     # Extract config values
     latitude = extract_config_value(config, "latitude", default=59.9139, converter=to_float)
@@ -654,95 +729,6 @@ def create_plugin_instance(
 
 
 @hookimpl
-async def test_plugin_connection(
-    type_id: str,
-    config: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Test Yr.no weather API connection."""
-    if type_id != "yr_weather":
-        return None
-
-    latitude = extract_config_value(config, "latitude", converter=to_float)
-    longitude = extract_config_value(config, "longitude", converter=to_float)
-
-    if latitude is None or longitude is None:
-        return {
-            "success": False,
-            "message": "Latitude and longitude are required. Use 'Get Coordinates' to find them.",
-        }
-
-    # Validate coordinates
-    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
-        return {
-            "success": False,
-            "message": "Invalid coordinates. Latitude must be between -90 and 90, longitude between -180 and 180.",  # noqa: E501
-        }
-
-    # Round to 4 decimals as per Yr.no API requirements
-    latitude = round(latitude, 4)
-    longitude = round(longitude, 4)
-
-    try:
-        headers = {
-            "User-Agent": "Calvin-Dashboard/1.0 (https://github.com/osterbergsimon/calvin)",
-        }
-        params = {
-            "lat": latitude,
-            "lon": longitude,
-        }
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                "https://api.met.no/weatherapi/locationforecast/2.0/compact",
-                params=params,
-                headers=headers,
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("properties") and data.get("properties", {}).get("timeseries"):
-                    return {
-                        "success": True,
-                        "message": f"Successfully connected to Yr.no API. Weather data available for coordinates ({latitude}, {longitude}).",  # noqa: E501
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": "Connected to Yr.no API but received invalid data format.",
-                    }
-            elif response.status_code == 422:
-                return {
-                    "success": False,
-                    "message": f"Location ({latitude}, {longitude}) is not covered by Yr.no weather service. Please try different coordinates.",  # noqa: E501
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Yr.no API returned status {response.status_code}. Please check your coordinates.",  # noqa: E501
-                }
-    except httpx.TimeoutException:
-        return {
-            "success": False,
-            "message": "Connection to Yr.no API timed out. Please check your internet connection.",
-        }
-    except httpx.ConnectError:
-        return {
-            "success": False,
-            "message": "Could not connect to Yr.no API. Please check your internet connection.",
-        }
-    except httpx.HTTPError as e:
-        return {
-            "success": False,
-            "message": f"Network error: {str(e)}",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error: {str(e)}",
-        }
-
-
-@hookimpl
 async def handle_plugin_config_update(
     type_id: str,
     config: dict[str, Any],
@@ -762,7 +748,7 @@ async def handle_plugin_config_update(
         forecast_days = extract_config_value(c, "forecast_days", default=5, converter=to_int)
         location = extract_config_value(c, "location", default=None, converter=to_str)
         display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(c, "fullscreen", default=False)
+        fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
 
         return {
             "latitude": latitude,
@@ -771,7 +757,7 @@ async def handle_plugin_config_update(
             "forecast_days": min(max(forecast_days or 5, 1), 9),
             "location": location,
             "display_order": display_order or 0,
-            "fullscreen": fullscreen or False,
+            "fullscreen": bool(fullscreen),
         }
 
     def validate_config(c: dict[str, Any]) -> bool:

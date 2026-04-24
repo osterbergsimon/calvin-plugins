@@ -6,6 +6,7 @@ Works with YouTube Music, Spotify, Netflix, Plex, and any Cast-enabled app.
 """
 
 import asyncio
+import time
 from typing import Any
 
 from app.plugins.base import PluginType
@@ -19,6 +20,7 @@ from app.plugins.utils.instance_manager import (
 
 try:
     import pychromecast
+
     _PYCHROMECAST_AVAILABLE = True
 except ImportError:
     _PYCHROMECAST_AVAILABLE = False
@@ -87,7 +89,7 @@ class ChromecastServicePlugin(ServicePlugin):
     async def get_content(self) -> dict[str, Any]:
         return {
             "type": "chromecast",
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "config": {
                 "device_name": self.device_name,
             },
@@ -95,7 +97,7 @@ class ChromecastServicePlugin(ServicePlugin):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "url": f"/api/web-services/{self.plugin_id}/data",
+            "url": f"/api/plugins/{self.plugin_id}/data",
             "device_name": self.device_name,
         }
 
@@ -111,11 +113,10 @@ class ChromecastServicePlugin(ServicePlugin):
 
     def _get_cast_status(self) -> dict[str, Any]:
         """Blocking call — runs in a thread pool via run_in_executor."""
+        browser = None
+        cast = None
         try:
-            chromecasts, browser = pychromecast.get_chromecasts(
-                timeout=self.discovery_timeout
-            )
-            pychromecast.discovery.stop_discovery(browser)
+            chromecasts, browser = pychromecast.get_chromecasts(timeout=self.discovery_timeout)
 
             if not chromecasts:
                 return {"state": "no_devices"}
@@ -125,7 +126,10 @@ class ChromecastServicePlugin(ServicePlugin):
                 names = [c.cast_info.friendly_name for c in chromecasts]
                 return {"state": "device_not_found", "available_devices": names}
 
-            cast.wait(timeout=3)
+            cast.wait(timeout=self.discovery_timeout)
+            cast.media_controller.update_status()
+            # Allow the Chromecast session to populate media status before reading it.
+            time.sleep(0.5)
             media = cast.media_controller.status
 
             result: dict[str, Any] = {
@@ -143,12 +147,21 @@ class ChromecastServicePlugin(ServicePlugin):
                 result["album_art_url"] = media.images[0].url if media.images else None
                 result["duration"] = media.duration
                 result["current_time"] = media.current_time
-
-            cast.disconnect()
             return result
 
         except Exception as e:
             return {"state": "error", "error": str(e)}
+        finally:
+            if browser is not None:
+                try:
+                    pychromecast.discovery.stop_discovery(browser)
+                except Exception:
+                    pass
+            if cast is not None:
+                try:
+                    cast.disconnect()
+                except Exception:
+                    pass
 
     def _pick_device(self, chromecasts: list) -> Any | None:
         if not self.device_name:
@@ -164,29 +177,31 @@ class ChromecastServicePlugin(ServicePlugin):
             return False
         return True
 
+    @classmethod
+    async def scan_type_options(cls, field_key: str) -> dict[str, Any] | None:
+        """Discover Chromecast devices for the device_name field."""
+        if field_key != "device_name":
+            return None
+        if not _PYCHROMECAST_AVAILABLE:
+            return {"options": [], "error": "pychromecast is not installed"}
+
+        def _discover():
+            chromecasts, browser = pychromecast.get_chromecasts(timeout=5)
+            pychromecast.discovery.stop_discovery(browser)
+            return [
+                {"value": c.cast_info.friendly_name, "label": c.cast_info.friendly_name}
+                for c in chromecasts
+            ]
+
+        options = await asyncio.get_event_loop().run_in_executor(None, _discover)
+        return {"options": options}
+
     async def configure(self, config: dict[str, Any]) -> None:
         await super().configure(config)
         self.device_name = extract_config_value(config, "device_name", default="", converter=to_str)
-        self.discovery_timeout = extract_config_value(config, "discovery_timeout", default=5, converter=to_int)
-
-
-@hookimpl
-async def scan_plugin_options(type_id: str, field_key: str) -> dict[str, Any] | None:
-    if type_id != "chromecast" or field_key != "device_name":
-        return None
-    if not _PYCHROMECAST_AVAILABLE:
-        return {"options": [], "error": "pychromecast is not installed"}
-
-    def _discover():
-        chromecasts, browser = pychromecast.get_chromecasts(timeout=5)
-        pychromecast.discovery.stop_discovery(browser)
-        return [
-            {"value": c.cast_info.friendly_name, "label": c.cast_info.friendly_name}
-            for c in chromecasts
-        ]
-
-    options = await asyncio.get_event_loop().run_in_executor(None, _discover)
-    return {"options": options}
+        self.discovery_timeout = extract_config_value(
+            config, "discovery_timeout", default=5, converter=to_int
+        )
 
 
 @hookimpl
@@ -207,7 +222,9 @@ def create_plugin_instance(
         plugin_id=plugin_id,
         name=name,
         device_name=extract_config_value(config, "device_name", default="", converter=to_str),
-        discovery_timeout=extract_config_value(config, "discovery_timeout", default=5, converter=to_int),
+        discovery_timeout=extract_config_value(
+            config, "discovery_timeout", default=5, converter=to_int
+        ),
         enabled=config.get("enabled", False),
     )
 
@@ -226,7 +243,9 @@ async def handle_plugin_config_update(
     def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
         return {
             "device_name": extract_config_value(c, "device_name", default="", converter=to_str),
-            "discovery_timeout": extract_config_value(c, "discovery_timeout", default=5, converter=to_int),
+            "discovery_timeout": extract_config_value(
+                c, "discovery_timeout", default=5, converter=to_int
+            ),
         }
 
     manager_config = InstanceManagerConfig(

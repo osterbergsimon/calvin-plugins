@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
@@ -13,6 +14,7 @@ from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
     handle_plugin_config_update_generic,
 )
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _APOD_URL = "https://api.nasa.gov/planetary/apod"
 _DEMO_KEY = "DEMO_KEY"
@@ -72,6 +74,11 @@ class NasaApodImagePlugin(ImagePlugin):
         self._last_scan: datetime | None = None
 
     async def initialize(self) -> None:
+        # Restore scan results from disk so a restart doesn't re-hit the API
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -98,7 +105,7 @@ class NasaApodImagePlugin(ImagePlugin):
                 response.raise_for_status()
                 return response.content
             except httpx.HTTPError as e:
-                print(f"NASA APOD: error fetching image data: {e}")
+                logger.warning(f"[NASA APOD] Error fetching image data: {e}")
                 return None
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -152,16 +159,17 @@ class NasaApodImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:
-            print(f"NASA APOD: HTTP error {e.response.status_code}: {e}")
+            logger.warning(f"[NASA APOD] HTTP error {e.response.status_code}: {e}")
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"NASA APOD: request error: {e}")
+            logger.warning(f"[NASA APOD] Request error: {e}")
             return self._images.copy()
         except Exception as e:
-            print(f"NASA APOD: unexpected error: {e}")
+            logger.exception(f"[NASA APOD] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:

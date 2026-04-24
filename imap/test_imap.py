@@ -23,13 +23,15 @@ try:
         InstanceManagerConfig,
         handle_plugin_config_update_generic,
     )
-    
+
     # Import the plugin
     import sys
     from pathlib import Path
+
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("imap_plugin", plugin_path)
         if spec and spec.loader:
             imap_module = importlib.util.module_from_spec(spec)
@@ -49,7 +51,7 @@ def imap_plugin():
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Set IMAGE_DIR env var for test
         os.environ["IMAGE_DIR"] = tmp_dir
-        
+
         plugin = ImapBackendPlugin(
             plugin_id="imap-instance",
             name="Email (IMAP)",
@@ -63,7 +65,7 @@ def imap_plugin():
             enabled=True,
         )
         yield plugin
-        
+
         # Cleanup
         if "IMAGE_DIR" in os.environ:
             del os.environ["IMAGE_DIR"]
@@ -127,73 +129,115 @@ class TestImapBackendPlugin:
     @pytest.mark.asyncio
     async def test_validate_config_valid(self, imap_plugin):
         """Test config validation with valid config."""
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-        }) is True
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                }
+            )
+            is True
+        )
 
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-            "imap_server": "imap.outlook.com",
-            "imap_port": 143,
-            "check_interval": 600,
-        }) is True
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "imap_server": "imap.outlook.com",
+                    "imap_port": 143,
+                    "check_interval": 600,
+                }
+            )
+            is True
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_email(self, imap_plugin):
         """Test config validation with missing email address."""
         assert await imap_plugin.validate_config({"email_password": "test-password"}) is False
-        assert await imap_plugin.validate_config({"email_address": "", "email_password": "test-password"}) is False
+        assert (
+            await imap_plugin.validate_config(
+                {"email_address": "", "email_password": "test-password"}
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_password(self, imap_plugin):
         """Test config validation with missing password."""
         assert await imap_plugin.validate_config({"email_address": "test@example.com"}) is False
-        assert await imap_plugin.validate_config({"email_address": "test@example.com", "email_password": ""}) is False
+        assert (
+            await imap_plugin.validate_config(
+                {"email_address": "test@example.com", "email_password": ""}
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_invalid_port(self, imap_plugin):
         """Test config validation with invalid port."""
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-            "imap_port": 0,
-        }) is False
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "imap_port": 0,
+                }
+            )
+            is False
+        )
 
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-            "imap_port": 65536,
-        }) is False
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "imap_port": 65536,
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_invalid_check_interval(self, imap_plugin):
         """Test config validation with invalid check interval."""
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-            "check_interval": 30,  # Too small
-        }) is False
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "check_interval": 30,  # Too small
+                }
+            )
+            is False
+        )
 
-        assert await imap_plugin.validate_config({
-            "email_address": "test@example.com",
-            "email_password": "test-password",
-            "check_interval": 5000,  # Too large
-        }) is False
+        assert (
+            await imap_plugin.validate_config(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "check_interval": 5000,  # Too large
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_configure(self, imap_plugin):
         """Test plugin configuration."""
         with patch.object(imap_plugin, "is_running", return_value=False):
-            await imap_plugin.configure({
-                "email_address": "new@example.com",
-                "email_password": "new-password",
-                "imap_server": "imap.outlook.com",
-                "imap_port": 143,
-                "check_interval": 600,
-                "mark_as_read": False,
-            })
+            await imap_plugin.configure(
+                {
+                    "email_address": "new@example.com",
+                    "email_password": "new-password",
+                    "imap_server": "imap.outlook.com",
+                    "imap_port": 143,
+                    "check_interval": 600,
+                    "mark_as_read": False,
+                }
+            )
 
             assert imap_plugin.email_address == "new@example.com"
             assert imap_plugin.email_password == "new-password"
@@ -207,11 +251,13 @@ class TestImapBackendPlugin:
         """Test configuring with custom target directory."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.object(imap_plugin, "is_running", return_value=False):
-                await imap_plugin.configure({
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "target_directory": tmp_dir,
-                })
+                await imap_plugin.configure(
+                    {
+                        "email_address": "test@example.com",
+                        "email_password": "test-password",
+                        "target_directory": tmp_dir,
+                    }
+                )
 
                 assert imap_plugin.target_directory == Path(tmp_dir).resolve()
                 assert imap_plugin.target_directory.exists()
@@ -220,17 +266,21 @@ class TestImapBackendPlugin:
     async def test_configure_mark_as_read_string(self, imap_plugin):
         """Test configuring mark_as_read with string value."""
         with patch.object(imap_plugin, "is_running", return_value=False):
-            await imap_plugin.configure({
-                "email_address": "test@example.com",
-                "email_password": "test-password",
-                "mark_as_read": "false",
-            })
+            await imap_plugin.configure(
+                {
+                    "email_address": "test@example.com",
+                    "email_password": "test-password",
+                    "mark_as_read": "false",
+                }
+            )
 
             assert imap_plugin.mark_as_read is False
 
-            await imap_plugin.configure({
-                "mark_as_read": "true",
-            })
+            await imap_plugin.configure(
+                {
+                    "mark_as_read": "true",
+                }
+            )
 
             assert imap_plugin.mark_as_read is True
 
@@ -246,6 +296,23 @@ class TestImapBackendPlugin:
             assert imap_plugin.email_address == original_email
             assert imap_plugin.check_interval == 600
 
+    @pytest.mark.asyncio
+    async def test_test_type_config_missing_credentials(self):
+        result = await ImapBackendPlugin.test_type_config({})
+        assert result["success"] is False
+        assert "required" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_fetch_type_data_not_found(self):
+        from app.models.db_models import PluginDB
+
+        with patch.object(PluginDB.objects, "filter") as filter_mock:
+            filter_mock.return_value.all = AsyncMock(return_value=[])
+            result = await ImapBackendPlugin.fetch_type_data()
+
+        assert result["success"] is False
+        assert result["images_downloaded"] == 0
+
 
 @pytest.mark.asyncio
 class TestImapPluginHooks:
@@ -259,15 +326,17 @@ class TestImapPluginHooks:
 
     async def test_handle_plugin_config_update(self):
         """Test handle_plugin_config_update hook.
-        
+
         Note: This test is skipped when run from the plugin directory because it requires
         the `test_db` fixture which is only available in the backend test suite.
-        
+
         To test handle_plugin_config_update hooks, run the backend test suite from the
         backend directory:
             cd backend
             pytest tests/unit/test_plugin_hooks.py
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
-                   "Run from backend directory: "
-                   "cd backend && pytest tests/unit/test_plugin_hooks.py")
+        pytest.skip(
+            "Requires backend test fixtures (test_db). "
+            "Run from backend directory: "
+            "cd backend && pytest tests/unit/test_plugin_hooks.py"
+        )

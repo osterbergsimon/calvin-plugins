@@ -79,7 +79,7 @@ def _protocol_methods(plugin_type: str) -> list[str]:
             "    async def get_content(self) -> dict[str, Any]:",
             "        return {",
             '            "type": "api",',
-            '            "url": f"/api/web-services/{self.plugin_id}/data",',
+            '            "url": f"/api/plugins/{self.plugin_id}/data",',
             "        }",
             "",
             "    async def validate_config(self, config: dict[str, Any]) -> bool:",

@@ -4,33 +4,23 @@
       <div class="spinner" />
     </div>
 
-    <!-- Nothing casting -->
     <div v-else-if="state === 'idle' || state === 'no_devices'" class="np-idle">
       <div class="np-idle-icon">📺</div>
       <span class="np-idle-text">{{ deviceName || 'Chromecast' }} — nothing casting</span>
     </div>
 
-    <!-- Error -->
     <div v-else-if="state === 'error'" class="np-idle">
       <span class="np-idle-text">{{ data.error }}</span>
     </div>
 
-    <!-- Active media -->
     <div v-else class="np-active">
-      <img
-        v-if="data.album_art_url"
-        class="np-art"
-        :src="data.album_art_url"
-        alt="Album art"
-      />
-      <div v-else class="np-art-placeholder">
-        <span>{{ appIcon }}</span>
-      </div>
-      <div class="np-info">
+      <img v-if="data.album_art_url" class="np-art" :src="data.album_art_url" alt="" />
+      <div v-else class="np-art-placeholder">{{ appIcon }}</div>
+
+      <div class="np-overlay">
         <div class="np-app">{{ data.app_name }}</div>
         <div class="np-title" :title="data.title">{{ data.title || '—' }}</div>
         <div v-if="data.artist" class="np-artist">{{ data.artist }}</div>
-        <div v-if="data.album" class="np-album">{{ data.album }}</div>
         <div v-if="data.duration" class="np-progress">
           <div class="np-bar-track">
             <div class="np-bar-fill" :style="{ width: progressPct + '%' }" />
@@ -91,77 +81,81 @@ function formatTime(secs) {
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0.75rem 1rem;
-  color: var(--color-text, #e0e0e0);
+  justify-content: center;
+  overflow: hidden;
+  color: #fff;
   font-size: 0.85rem;
 }
 
+/* ── idle / error ── */
 .np-idle {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   opacity: 0.5;
-  width: 100%;
-  justify-content: center;
+  padding: 0.75rem 1rem;
 }
-
 .np-idle-icon { font-size: 1.5rem; }
-.np-idle-text { font-size: 0.8rem; }
+.np-idle-text  { font-size: 0.8rem; }
 
+/* ── active ── */
 .np-active {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+  position: relative;
   width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
 .np-art {
-  width: 72px;
-  height: 72px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 6px;
-  flex-shrink: 0;
 }
 
 .np-art-placeholder {
-  width: 72px;
-  height: 72px;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.08);
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2rem;
-  flex-shrink: 0;
+  font-size: 3rem;
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.np-info {
-  flex: 1;
-  overflow: hidden;
+/* gradient overlay + content pinned to bottom */
+.np-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2rem 0.9rem 0.75rem;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.82));
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
 }
 
 .np-app {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.5;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
 }
 
 .np-title {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
-.np-artist, .np-album {
+.np-artist {
   font-size: 0.8rem;
-  opacity: 0.7;
+  opacity: 0.8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,39 +165,39 @@ function formatTime(secs) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.25rem;
+  margin-top: 0.35rem;
 }
 
 .np-bar-track {
   flex: 1;
   height: 3px;
-  background: rgba(255,255,255,0.15);
+  background: rgba(255, 255, 255, 0.25);
   border-radius: 2px;
   overflow: hidden;
 }
 
 .np-bar-fill {
   height: 100%;
-  background: var(--color-accent, #fff);
+  background: #fff;
   border-radius: 2px;
   transition: width 1s linear;
 }
 
 .np-time {
-  font-size: 0.7rem;
-  opacity: 0.5;
+  font-size: 0.65rem;
+  opacity: 0.55;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
+/* ── spinner ── */
 .spinner {
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255,255,255,0.15);
-  border-top-color: var(--color-accent, #fff);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>
