@@ -6,16 +6,48 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_bool, to_str, to_int
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
 )
+from app.plugins.utils.config import extract_config_value, to_bool, to_str, to_int
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 # Loguru automatically includes module/function info in logs
+
+
+CREATE_FIELDS = (
+    ServiceConfigField(
+        "api_key",
+        default="",
+        converter=to_str,
+        transform=lambda value: str(value).strip() if value else "",
+    ),
+    ServiceConfigField(
+        "location",
+        default="",
+        converter=to_str,
+        transform=lambda value: str(value).strip() if value else "",
+    ),
+    ServiceConfigField(
+        "units",
+        default="metric",
+        converter=to_str,
+        transform=lambda value: str(value).strip() if value else "metric",
+    ),
+    ServiceConfigField(
+        "forecast_days",
+        default=3,
+        converter=to_int,
+        transform=lambda value: min(max(int(value), 1), 5) if value else 3,
+    ),
+    ServiceConfigField("display_order", default=0, converter=to_int),
+    ServiceConfigField("fullscreen", default=False, converter=to_bool),
+)
 
 
 class WeatherServicePlugin(ServicePlugin):
@@ -24,13 +56,14 @@ class WeatherServicePlugin(ServicePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "weather",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Weather",
-            "description": "Display current weather conditions and forecast from OpenWeatherMap",
-            "version": "1.0.0",
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="weather",
+            name="Weather",
+            description="Display current weather conditions and forecast from OpenWeatherMap",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            instance_label="Location",
+            common_config_schema={
                 "api_key": {
                     "type": "password",
                     "description": "OpenWeatherMap API key",
@@ -54,7 +87,7 @@ class WeatherServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "instance_config_schema": {
+            instance_config_schema={
                 "location": {
                     "type": "string",
                     "description": "Location (city name, state code, country code)",
@@ -115,7 +148,7 @@ class WeatherServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "ui_actions": [
+            ui_actions=[
                 {
                     "id": "save",
                     "type": "save",
@@ -129,7 +162,7 @@ class WeatherServicePlugin(ServicePlugin):
                     "style": "secondary",
                 },
             ],
-            "display_schema": {
+            display_schema={
                 "type": "api",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
@@ -165,13 +198,10 @@ class WeatherServicePlugin(ServicePlugin):
                 },
                 "render_template": "weather",
             },
-            "statusbar_schema": {
+            statusbar_schema={
                 "component": "weather/WeatherStatusbar.vue",
             },
-            "supports_multiple_instances": True,  # Multi-instance plugin
-            "instance_label": "Location",
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -562,35 +592,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> WeatherServicePlugin | None:
     """Create a WeatherServicePlugin instance."""
-    if type_id != "weather":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-    display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
-
-    # Extract config values
-    api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-    location = extract_config_value(config, "location", default="", converter=to_str)
-    units = extract_config_value(config, "units", default="metric", converter=to_str)
-    forecast_days = extract_config_value(config, "forecast_days", default=3, converter=to_int)
-
-    # Clean up values
-    api_key = str(api_key).strip() if api_key else ""
-    location = str(location).strip() if location else ""
-    units = str(units).strip() if units else "metric"
-    forecast_days = min(max(int(forecast_days), 1), 5) if forecast_days else 3
-
-    return WeatherServicePlugin(
+    return create_service_plugin_instance(
+        WeatherServicePlugin,
+        expected_type_id="weather",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        api_key=api_key,
-        location=location,
-        units=units,
-        forecast_days=forecast_days,
-        enabled=enabled,
-        display_order=display_order,
-        fullscreen=fullscreen,
+        config=config,
+        fields=CREATE_FIELDS,
     )
 
 
@@ -605,28 +614,6 @@ async def handle_plugin_config_update(
     """Handle Weather plugin configuration update and instance management."""
     if type_id != "weather":
         return None
-
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        api_key = extract_config_value(c, "api_key", converter=to_str)
-        location = extract_config_value(c, "location", converter=to_str)
-        units = extract_config_value(c, "units", default="metric", converter=to_str)
-        forecast_days = extract_config_value(c, "forecast_days", default=3, converter=to_int)
-        display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
-
-        show_in_statusbar = extract_config_value(
-            c, "show_in_statusbar", default=False, converter=to_bool
-        )
-        return {
-            "api_key": str(api_key).strip() if api_key else "",
-            "location": str(location).strip() if location else "",
-            "units": str(units).strip() if units else "metric",
-            "forecast_days": min(max(int(forecast_days), 1), 5) if forecast_days else 3,
-            "display_order": display_order or 0,
-            "fullscreen": bool(fullscreen),
-            "show_in_statusbar": bool(show_in_statusbar),
-        }
 
     def validate_config(c: dict[str, Any]) -> bool:
         """Validate config has required api_key and location."""
@@ -655,12 +642,17 @@ async def handle_plugin_config_update(
         # Fallback ID if location not available
         return f"{t}-instance"
 
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="weather",
-        single_instance=False,  # Multi-instance plugin
-        normalize_config=normalize_config,
+        fields=CREATE_FIELDS,
+        single_instance=False,
         validate_config=validate_config,
         generate_instance_id=generate_instance_id,
+        extra_normalize=lambda config: {
+            "show_in_statusbar": bool(
+                extract_config_value(config, "show_in_statusbar", default=False, converter=to_bool)
+            )
+        },
         default_instance_name="Weather",
     )
 

@@ -5,20 +5,30 @@ import shutil
 import subprocess
 from typing import Any
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_bool, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
 )
+from app.plugins.utils.config import extract_config_value, to_bool, to_str
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 try:
     import psutil
+
     _PSUTIL_AVAILABLE = True
 except ImportError:
     _PSUTIL_AVAILABLE = False
+
+
+SERVICE_FIELDS = (
+    ServiceConfigField("show_temperature", default=True, converter=to_bool),
+    ServiceConfigField("show_network", default=True, converter=to_bool),
+    ServiceConfigField("temp_unit", default="C", converter=to_str),
+)
 
 
 def _vcgencmd_temp() -> float | None:
@@ -26,9 +36,7 @@ def _vcgencmd_temp() -> float | None:
     if not shutil.which("vcgencmd"):
         return None
     try:
-        out = subprocess.check_output(
-            ["vcgencmd", "measure_temp"], timeout=2, text=True
-        )
+        out = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=2, text=True)
         # output: "temp=42.8'C"
         return float(out.strip().split("=")[1].replace("'C", ""))
     except Exception:
@@ -55,14 +63,13 @@ class SystemMonitorServicePlugin(ServicePlugin):
 
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
-        return {
-            "type_id": "system_monitor",
-            "plugin_type": PluginType.SERVICE,
-            "name": "System Monitor",
-            "description": "Live CPU, memory, disk, temperature and network stats",
-            "version": "1.0.0",
-            "supports_multiple_instances": False,
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="system_monitor",
+            name="System Monitor",
+            description="Live CPU, memory, disk, temperature and network stats",
+            plugin_class=cls,
+            supports_multiple_instances=False,
+            common_config_schema={
                 "show_temperature": {
                     "type": "boolean",
                     "description": "Show CPU/GPU temperature",
@@ -94,15 +101,13 @@ class SystemMonitorServicePlugin(ServicePlugin):
                     "ui": {"component": "checkbox"},
                 },
             },
-            "instance_config_schema": {},
-            "display_schema": {
+            display_schema={
                 "component": "system_monitor/SystemMonitor.vue",
             },
-            "statusbar_schema": {
+            statusbar_schema={
                 "component": "system_monitor/SystemStatusbar.vue",
             },
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -205,8 +210,12 @@ class SystemMonitorServicePlugin(ServicePlugin):
 
     async def configure(self, config: dict[str, Any]) -> None:
         await super().configure(config)
-        self.show_temperature = extract_config_value(config, "show_temperature", default=True, converter=to_bool)
-        self.show_network = extract_config_value(config, "show_network", default=True, converter=to_bool)
+        self.show_temperature = extract_config_value(
+            config, "show_temperature", default=True, converter=to_bool
+        )
+        self.show_network = extract_config_value(
+            config, "show_network", default=True, converter=to_bool
+        )
         self.temp_unit = extract_config_value(config, "temp_unit", default="C", converter=to_str)
 
 
@@ -222,15 +231,14 @@ def create_plugin_instance(
     name: str,
     config: dict[str, Any],
 ) -> SystemMonitorServicePlugin | None:
-    if type_id != "system_monitor":
-        return None
-    return SystemMonitorServicePlugin(
+    return create_service_plugin_instance(
+        SystemMonitorServicePlugin,
+        expected_type_id="system_monitor",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        show_temperature=extract_config_value(config, "show_temperature", default=True, converter=to_bool),
-        show_network=extract_config_value(config, "show_network", default=True, converter=to_bool),
-        temp_unit=extract_config_value(config, "temp_unit", default="C", converter=to_str),
-        enabled=config.get("enabled", False),
+        config=config,
+        fields=SERVICE_FIELDS,
     )
 
 
@@ -245,19 +253,16 @@ async def handle_plugin_config_update(
     if type_id != "system_monitor":
         return None
 
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "show_temperature": extract_config_value(c, "show_temperature", default=True, converter=to_bool),
-            "show_network": extract_config_value(c, "show_network", default=True, converter=to_bool),
-            "temp_unit": extract_config_value(c, "temp_unit", default="C", converter=to_str),
-            "show_in_statusbar": extract_config_value(c, "show_in_statusbar", default=False, converter=to_bool),
-        }
-
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="system_monitor",
+        fields=SERVICE_FIELDS,
         single_instance=True,
         instance_id="system-monitor-instance",
-        normalize_config=normalize_config,
+        extra_normalize=lambda config: {
+            "show_in_statusbar": extract_config_value(
+                config, "show_in_statusbar", default=False, converter=to_bool
+            )
+        },
         default_instance_name="System Monitor",
     )
 

@@ -2,13 +2,20 @@
 
 from typing import Any
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
+)
 from app.plugins.utils.config import extract_config_value, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+
+
+SERVICE_FIELDS = (
+    ServiceConfigField("message", default="Hello from test plugin!", converter=to_str),
 )
 
 
@@ -18,14 +25,13 @@ class TestServicePlugin(ServicePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "test_plugin",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Test Plugin",
-            "description": "A basic test plugin for plugin installation testing",
-            "version": "1.0.0",
-            "supports_multiple_instances": False,  # Single-instance plugin
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="test_plugin",
+            name="Test Plugin",
+            description="A basic test plugin for plugin installation testing",
+            plugin_class=cls,
+            supports_multiple_instances=False,
+            common_config_schema={
                 "message": {
                     "type": "string",
                     "description": "Test message to display",
@@ -39,19 +45,21 @@ class TestServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "display_schema": {
+            display_schema={
                 "type": "api",
                 "api_endpoint": None,
                 "method": None,
                 "data_schema": None,
                 "render_template": "iframe",
             },
-            "instance_config_schema": {},  # No instance-specific settings (single-instance)
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
-        self, plugin_id: str, name: str, message: str = "Hello from test plugin!", enabled: bool = True
+        self,
+        plugin_id: str,
+        name: str,
+        message: str = "Hello from test plugin!",
+        enabled: bool = True,
     ):
         """
         Initialize test service plugin.
@@ -101,7 +109,9 @@ class TestServicePlugin(ServicePlugin):
         # Accept any configuration for testing purposes
         # Message is optional and can be any string
         if "message" in config:
-            message = extract_config_value(config, "message", default="Hello from test plugin!", converter=to_str)
+            message = extract_config_value(
+                config, "message", default="Hello from test plugin!", converter=to_str
+            )
             if message and not isinstance(message, str):
                 return False
         return True
@@ -116,7 +126,9 @@ class TestServicePlugin(ServicePlugin):
         await super().configure(config)
 
         if "message" in config:
-            self.message = extract_config_value(config, "message", default="Hello from test plugin!", converter=to_str)
+            self.message = extract_config_value(
+                config, "message", default="Hello from test plugin!", converter=to_str
+            )
 
 
 # Register this plugin with pluggy
@@ -134,19 +146,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> TestServicePlugin | None:
     """Create a TestServicePlugin instance."""
-    if type_id != "test_plugin":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-
-    # Extract config values using utility functions
-    message = extract_config_value(config, "message", default="Hello from test plugin!", converter=to_str)
-
-    return TestServicePlugin(
+    return create_service_plugin_instance(
+        TestServicePlugin,
+        expected_type_id="test_plugin",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        message=message,
-        enabled=enabled,
+        config=config,
+        fields=SERVICE_FIELDS,
     )
 
 
@@ -162,21 +169,14 @@ async def handle_plugin_config_update(
     if type_id != "test_plugin":
         return None
 
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        return {
-            "message": extract_config_value(c, "message", default="Hello from test plugin!", converter=to_str),
-        }
-
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="test_plugin",
+        fields=SERVICE_FIELDS,
         single_instance=True,
         instance_id="test-plugin-instance",
-        normalize_config=normalize_config,
         default_instance_name="Test Plugin",
     )
 
     return await handle_plugin_config_update_generic(
         type_id, config, enabled, db_type, session, manager_config
     )
-

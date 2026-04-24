@@ -102,21 +102,26 @@ See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugi
 
 ### Step 3: Create Plugin Implementation (`plugin.py`)
 
-Create `plugin.py` with your plugin implementation. **Use the generic instance manager and config utilities** to simplify your code:
+Create `plugin.py` with your plugin implementation. For service plugins, prefer the shared helpers in `app.plugins.sdk.service` and use the generic instance manager for lifecycle handling:
 
 ```python
 """My custom plugin."""
 
-import hashlib
 from typing import Any
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
+)
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+
+
+SERVICE_FIELDS = (
+    ServiceConfigField("api_key", default="", converter=str),
 )
 
 
@@ -125,16 +130,14 @@ class MyServicePlugin(ServicePlugin):
 
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return {
-            "type_id": "my_plugin",
-            "plugin_type": PluginType.SERVICE,
-            "name": "My Plugin",
-            "description": "A custom plugin",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,  # Set to False for single-instance plugins
-            "common_config_schema": {},  # Plugin-type-level settings (rarely used)
-            "instance_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="my_plugin",
+            name="My Plugin",
+            description="A custom plugin",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            common_config_schema={},
+            instance_config_schema={
                 # Instance-specific settings
                 "api_key": {
                     "type": "password",
@@ -145,13 +148,12 @@ class MyServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "display_schema": {
+            display_schema={
                 "type": "api",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
             },
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(self, plugin_id: str, name: str, api_key: str = "", enabled: bool = True):
         """Initialize plugin."""
@@ -174,13 +176,11 @@ class MyServicePlugin(ServicePlugin):
         }
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin configuration using config utilities."""
-        api_key = extract_config_value(config, "api_key", to_str, "")
-        return bool(api_key)
+        return bool(str(config.get("api_key", "")).strip())
 
     async def configure(self, config: dict[str, Any]) -> None:
-        """Update plugin configuration using config utilities."""
-        self.api_key = extract_config_value(config, "api_key", to_str, self.api_key)
+        if "api_key" in config:
+            self.api_key = str(config["api_key"]).strip()
 
 
 # Register plugin with pluggy
@@ -197,19 +197,14 @@ def create_plugin_instance(
     name: str,
     config: dict[str, Any],
 ) -> MyServicePlugin | None:
-    """Create plugin instance using config utilities."""
-    if type_id != "my_plugin":
-        return None
-
-    enabled = config.get("enabled", False)
-    # Use extract_config_value for type-safe config extraction
-    api_key = extract_config_value(config, "api_key", to_str, "")
-
-    return MyServicePlugin(
+    return create_service_plugin_instance(
+        MyServicePlugin,
+        expected_type_id="my_plugin",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        api_key=api_key,
-        enabled=enabled,
+        config=config,
+        fields=SERVICE_FIELDS,
     )
 
 
@@ -225,21 +220,16 @@ async def handle_plugin_config_update(
     if type_id != "my_plugin":
         return None
 
-    # Define how to generate instance IDs (optional for multi-instance plugins)
-    def generate_instance_id(c: dict[str, Any]) -> str:
+    def generate_instance_id(c: dict[str, Any], _: str) -> str:
         """Generate unique instance ID based on config."""
-        # For multi-instance plugins, create a hash from unique config values
-        # For single-instance plugins, return a fixed ID like "my-plugin-instance"
         unique_str = f"my_plugin_{c.get('api_key', '')}"
-        return f"my-plugin-{hashlib.md5(unique_str.encode()).hexdigest()[:8]}"
+        return f"my-plugin-{abs(hash(unique_str)) % 100000}"
 
-    # Configure the generic instance manager
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="my_plugin",
-        plugin_class=MyServicePlugin,
-        validate_config=MyServicePlugin(None, "").validate_config,
-        normalize_config=lambda c: c,  # Add normalization if needed
-        generate_instance_id=generate_instance_id,  # Optional for multi-instance
+        fields=SERVICE_FIELDS,
+        validate_config=lambda c: bool(str(c.get("api_key", "")).strip()),
+        generate_instance_id=generate_instance_id,
     )
 
     return await handle_plugin_config_update_generic(
@@ -254,7 +244,7 @@ async def handle_plugin_config_update(
 
 **Key points:**
 
-1. **Use config utilities** (`extract_config_value`, `to_str`, `to_int`, `to_bool`, `to_float`) for type-safe configuration extraction
+1. **Use the service SDK** (`ServiceConfigField`, `build_service_plugin_metadata`, `create_service_plugin_instance`, `build_service_manager_config`) for service plugins
 2. **Declare `supports_multiple_instances`** in metadata (`True` for multi-instance, `False` for single-instance)
 3. **Use `instance_config_schema`** for instance-specific settings and `common_config_schema` for plugin-type-level settings (rare)
 4. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation/updates

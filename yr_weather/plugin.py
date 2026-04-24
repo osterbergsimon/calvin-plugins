@@ -6,16 +6,51 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_bool, to_float, to_int, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
 )
+from app.plugins.utils.config import extract_config_value, to_bool, to_float, to_int, to_str
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 # Loguru automatically includes module/function info in logs
+
+
+CREATE_FIELDS = (
+    ServiceConfigField(
+        "latitude",
+        default=59.9139,
+        converter=to_float,
+        transform=lambda value: round(float(value), 4) if value is not None else 59.9139,
+    ),
+    ServiceConfigField(
+        "longitude",
+        default=10.7522,
+        converter=to_float,
+        transform=lambda value: round(float(value), 4) if value is not None else 10.7522,
+    ),
+    ServiceConfigField(
+        "altitude", default=0, converter=to_int, transform=lambda value: int(value) if value else 0
+    ),
+    ServiceConfigField(
+        "forecast_days",
+        default=5,
+        converter=to_int,
+        transform=lambda value: min(max(int(value), 1), 9) if value else 5,
+    ),
+    ServiceConfigField(
+        "location",
+        default=None,
+        converter=to_str,
+        transform=lambda value: str(value).strip() if value else None,
+    ),
+    ServiceConfigField("display_order", default=0, converter=to_int),
+    ServiceConfigField("fullscreen", default=False, converter=to_bool),
+)
 
 
 class YrWeatherServicePlugin(ServicePlugin):
@@ -24,13 +59,14 @@ class YrWeatherServicePlugin(ServicePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "yr_weather",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Yr.no Weather",
-            "description": "Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",  # noqa: E501
-            "version": "1.0.0",
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="yr_weather",
+            name="Yr.no Weather",
+            description="Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            instance_label="Location",
+            common_config_schema={
                 "display_order": {
                     "type": "integer",
                     "description": "Display order for service instances",
@@ -40,7 +76,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "instance_config_schema": {
+            instance_config_schema={
                 "location": {
                     "type": "string",
                     "description": "Location name (city, address, etc.)",
@@ -118,8 +154,8 @@ class YrWeatherServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "ui_actions": [],
-            "display_schema": {
+            ui_actions=[],
+            display_schema={
                 "type": "api",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
@@ -155,10 +191,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                 },
                 "render_template": "weather",  # Reuse the same WeatherWidget component!
             },
-            "supports_multiple_instances": True,  # Multi-instance plugin
-            "instance_label": "Location",
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -693,38 +726,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> YrWeatherServicePlugin | None:
     """Create a YrWeatherServicePlugin instance."""
-    if type_id != "yr_weather":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-    display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
-
-    # Extract config values
-    latitude = extract_config_value(config, "latitude", default=59.9139, converter=to_float)
-    longitude = extract_config_value(config, "longitude", default=10.7522, converter=to_float)
-    altitude = extract_config_value(config, "altitude", default=0, converter=to_int)
-    forecast_days = extract_config_value(config, "forecast_days", default=5, converter=to_int)
-    location = extract_config_value(config, "location", default=None, converter=to_str)
-
-    # Clean up values
-    latitude = round(float(latitude), 4) if latitude else 59.9139
-    longitude = round(float(longitude), 4) if longitude else 10.7522
-    altitude = int(altitude) if altitude else 0
-    forecast_days = min(max(int(forecast_days), 1), 9) if forecast_days else 5
-    location = str(location).strip() if location else None
-
-    return YrWeatherServicePlugin(
+    return create_service_plugin_instance(
+        YrWeatherServicePlugin,
+        expected_type_id="yr_weather",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        latitude=latitude,
-        longitude=longitude,
-        altitude=altitude,
-        forecast_days=forecast_days,
-        location=location,
-        enabled=enabled,
-        display_order=display_order,
-        fullscreen=fullscreen,
+        config=config,
+        fields=CREATE_FIELDS,
     )
 
 
@@ -739,26 +748,6 @@ async def handle_plugin_config_update(
     """Handle YrWeather plugin configuration update and instance management."""
     if type_id != "yr_weather":
         return None
-
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        latitude = extract_config_value(c, "latitude", converter=to_float)
-        longitude = extract_config_value(c, "longitude", converter=to_float)
-        altitude = extract_config_value(c, "altitude", default=0, converter=to_int)
-        forecast_days = extract_config_value(c, "forecast_days", default=5, converter=to_int)
-        location = extract_config_value(c, "location", default=None, converter=to_str)
-        display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
-
-        return {
-            "latitude": latitude,
-            "longitude": longitude,
-            "altitude": altitude or 0,
-            "forecast_days": min(max(forecast_days or 5, 1), 9),
-            "location": location,
-            "display_order": display_order or 0,
-            "fullscreen": bool(fullscreen),
-        }
 
     def validate_config(c: dict[str, Any]) -> bool:
         """Validate config has required latitude and longitude."""
@@ -791,23 +780,12 @@ async def handle_plugin_config_update(
         # Fallback ID if coordinates not available
         return f"{t}-instance"
 
-    def prepare_instance_config(c: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
-        """Prepare instance config with defaults for display_order and fullscreen."""
-        config = normalize_config(c)
-        # Ensure display_order and fullscreen have defaults
-        if "display_order" not in config:
-            config["display_order"] = 0
-        if "fullscreen" not in config:
-            config["fullscreen"] = False
-        return config
-
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="yr_weather",
-        single_instance=False,  # Multi-instance plugin
-        normalize_config=normalize_config,
+        fields=CREATE_FIELDS,
+        single_instance=False,
         validate_config=validate_config,
         generate_instance_id=generate_instance_id,
-        prepare_instance_config=prepare_instance_config,
         default_instance_name="Yr.no Weather",
     )
 

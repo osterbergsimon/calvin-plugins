@@ -2,9 +2,23 @@
 
 from typing import Any
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
+)
+
+
+SERVICE_FIELDS = (
+    ServiceConfigField(
+        "message",
+        default="Hello from test plugin with frontend!",
+        converter=str,
+        transform=lambda value: str(value) if value else "Hello from test plugin with frontend!",
+    ),
+)
 
 
 class TestFrontendServicePlugin(ServicePlugin):
@@ -13,13 +27,12 @@ class TestFrontendServicePlugin(ServicePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "test_plugin_frontend",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Test Plugin with Frontend",
-            "description": "A test plugin with frontend components for testing frontend installation",
-            "version": "1.0.0",
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="test_plugin_frontend",
+            name="Test Plugin with Frontend",
+            description="A test plugin with frontend components for testing frontend installation",
+            plugin_class=cls,
+            common_config_schema={
                 "message": {
                     "type": "string",
                     "description": "Test message to display",
@@ -33,15 +46,14 @@ class TestFrontendServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "display_schema": {
+            display_schema={
                 "type": "api",
                 "api_endpoint": None,
                 "method": None,
                 "data_schema": None,
                 "render_template": "iframe",
             },
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -90,24 +102,12 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> TestFrontendServicePlugin | None:
     """Create a TestFrontendServicePlugin instance."""
-    if type_id != "test_plugin_frontend":
-        return None
-
-    enabled = config.get("enabled", False)
-    message = config.get("message", "Hello from test plugin with frontend!")
-
-    if isinstance(message, dict):
-        message = (
-            message.get("value")
-            or message.get("default")
-            or "Hello from test plugin with frontend!"
-        )
-    message = str(message) if message else "Hello from test plugin with frontend!"
-
-    return TestFrontendServicePlugin(
+    return create_service_plugin_instance(
+        TestFrontendServicePlugin,
+        expected_type_id="test_plugin_frontend",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        message=message,
-        enabled=enabled,
+        config=config,
+        fields=SERVICE_FIELDS,
     )
-
