@@ -421,6 +421,95 @@ class WeatherServicePlugin(ServicePlugin):
 
         return True
 
+    @classmethod
+    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Test OpenWeatherMap connectivity for the configured location."""
+        api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+        location = extract_config_value(config, "location", default="", converter=to_str)
+        units = extract_config_value(config, "units", default="metric", converter=to_str)
+
+        api_key = api_key.strip() if api_key else ""
+        location = location.strip() if location else ""
+        units = units.strip() if units else "metric"
+
+        if not api_key or not location:
+            return {
+                "success": False,
+                "message": "OpenWeatherMap API key and location are required.",
+            }
+
+        try:
+            async with httpx.AsyncClient(
+                base_url="https://api.openweathermap.org/data/2.5",
+                timeout=10.0,
+            ) as client:
+                response = await client.get(
+                    "/weather",
+                    params={
+                        "q": location,
+                        "appid": api_key,
+                        "units": units,
+                    },
+                )
+
+            if response.status_code == 200:
+                data = response.json()
+                location_name = data.get("name", location)
+                country = data.get("sys", {}).get("country", "")
+                resolved_location = f"{location_name}, {country}" if country else location_name
+                description = data.get("weather", [{}])[0].get("description", "unknown conditions")
+                temperature = data.get("main", {}).get("temp")
+                temp_suffix = (
+                    f" Current temperature: {round(temperature)}°."
+                    if temperature is not None
+                    else ""
+                )
+                return {
+                    "success": True,
+                    "message": (
+                        f"Connected successfully. Resolved location: {resolved_location}. "
+                        f"Weather: {description}.{temp_suffix}"
+                    ),
+                }
+
+            if response.status_code == 401:
+                return {
+                    "success": False,
+                    "message": "Authentication failed. Check your OpenWeatherMap API key.",
+                }
+
+            if response.status_code == 404:
+                return {
+                    "success": False,
+                    "message": f"Location '{location}' was not found by OpenWeatherMap.",
+                }
+
+            return {
+                "success": False,
+                "message": f"OpenWeatherMap returned status {response.status_code}.",
+            }
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "message": "Connection to OpenWeatherMap timed out.",
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "Could not connect to OpenWeatherMap.",
+            }
+        except httpx.HTTPError as e:
+            return {
+                "success": False,
+                "message": f"Network error: {str(e)}",
+            }
+        except Exception as e:
+            logger.exception("Unexpected error testing weather plugin connection")
+            return {
+                "success": False,
+                "message": f"Error: {str(e)}",
+            }
+
     async def configure(self, config: dict[str, Any]) -> None:
         """
         Configure the plugin with new settings.
@@ -456,98 +545,6 @@ class WeatherServicePlugin(ServicePlugin):
 
         # Reinitialize with new config
         await self.initialize()
-
-
-@hookimpl
-async def test_plugin_connection(
-    type_id: str,
-    config: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Test OpenWeatherMap connectivity for the configured location."""
-    if type_id != "weather":
-        return None
-
-    api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-    location = extract_config_value(config, "location", default="", converter=to_str)
-    units = extract_config_value(config, "units", default="metric", converter=to_str)
-
-    api_key = api_key.strip() if api_key else ""
-    location = location.strip() if location else ""
-    units = units.strip() if units else "metric"
-
-    if not api_key or not location:
-        return {
-            "success": False,
-            "message": "OpenWeatherMap API key and location are required.",
-        }
-
-    try:
-        async with httpx.AsyncClient(
-            base_url="https://api.openweathermap.org/data/2.5",
-            timeout=10.0,
-        ) as client:
-            response = await client.get(
-                "/weather",
-                params={
-                    "q": location,
-                    "appid": api_key,
-                    "units": units,
-                },
-            )
-
-        if response.status_code == 200:
-            data = response.json()
-            location_name = data.get("name", location)
-            country = data.get("sys", {}).get("country", "")
-            resolved_location = f"{location_name}, {country}" if country else location_name
-            description = data.get("weather", [{}])[0].get("description", "unknown conditions")
-            temperature = data.get("main", {}).get("temp")
-            temp_suffix = f" Current temperature: {round(temperature)}°." if temperature is not None else ""
-            return {
-                "success": True,
-                "message": (
-                    f"Connected successfully. Resolved location: {resolved_location}. "
-                    f"Weather: {description}.{temp_suffix}"
-                ),
-            }
-
-        if response.status_code == 401:
-            return {
-                "success": False,
-                "message": "Authentication failed. Check your OpenWeatherMap API key.",
-            }
-
-        if response.status_code == 404:
-            return {
-                "success": False,
-                "message": f"Location '{location}' was not found by OpenWeatherMap.",
-            }
-
-        return {
-            "success": False,
-            "message": f"OpenWeatherMap returned status {response.status_code}.",
-        }
-    except httpx.TimeoutException:
-        return {
-            "success": False,
-            "message": "Connection to OpenWeatherMap timed out.",
-        }
-    except httpx.ConnectError:
-        return {
-            "success": False,
-            "message": "Could not connect to OpenWeatherMap.",
-        }
-    except httpx.HTTPError as e:
-        return {
-            "success": False,
-            "message": f"Network error: {str(e)}",
-        }
-    except Exception as e:
-        logger.exception("Unexpected error testing weather plugin connection")
-        return {
-            "success": False,
-            "message": f"Error: {str(e)}",
-        }
 
 
 # Register this plugin with pluggy
@@ -618,7 +615,9 @@ async def handle_plugin_config_update(
         display_order = extract_config_value(c, "display_order", default=0, converter=to_int)
         fullscreen = extract_config_value(c, "fullscreen", default=False, converter=to_bool)
 
-        show_in_statusbar = extract_config_value(c, "show_in_statusbar", default=False, converter=to_bool)
+        show_in_statusbar = extract_config_value(
+            c, "show_in_statusbar", default=False, converter=to_bool
+        )
         return {
             "api_key": str(api_key).strip() if api_key else "",
             "location": str(location).strip() if location else "",

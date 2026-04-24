@@ -329,7 +329,10 @@ class ImapBackendPlugin(BackendPlugin):
 
         except imaplib.IMAP4.error as e:
             error_msg = str(e)
-            if "authentication failed" in error_msg.lower() or "invalid credentials" in error_msg.lower():
+            if (
+                "authentication failed" in error_msg.lower()
+                or "invalid credentials" in error_msg.lower()
+            ):
                 return {
                     "success": False,
                     "message": "Authentication failed. Please check your email address and password.",
@@ -433,7 +436,9 @@ class ImapBackendPlugin(BackendPlugin):
         """Validate plugin configuration."""
         # Check required fields
         email_address = extract_config_value(config, "email_address", default="", converter=to_str)
-        email_password = extract_config_value(config, "email_password", default="", converter=to_str)
+        email_password = extract_config_value(
+            config, "email_password", default="", converter=to_str
+        )
 
         if not email_address or not email_address.strip():
             return False
@@ -448,11 +453,103 @@ class ImapBackendPlugin(BackendPlugin):
 
         # Validate check_interval if provided
         if "check_interval" in config:
-            check_interval = extract_config_value(config, "check_interval", default=300, converter=to_int)
+            check_interval = extract_config_value(
+                config, "check_interval", default=300, converter=to_int
+            )
             if check_interval < 60 or check_interval > 3600:
                 return False
 
         return True
+
+    @classmethod
+    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Test IMAP connection using the provided configuration."""
+        email_address = config.get("email_address", "")
+        email_password = config.get("email_password", "")
+        imap_server = config.get("imap_server", "imap.gmail.com")
+        imap_port = int(config.get("imap_port", 993))
+
+        if not email_address or not email_password:
+            return {
+                "success": False,
+                "message": "Email address and password are required",
+            }
+
+        try:
+            mail = imaplib.IMAP4_SSL(imap_server, imap_port)
+            mail.login(email_address, email_password)
+            mail.select("INBOX")
+            mail.close()
+            mail.logout()
+
+            return {
+                "success": True,
+                "message": f"Successfully connected to {imap_server}",
+            }
+        except imaplib.IMAP4.error as e:
+            error_msg = str(e)
+            if (
+                "authentication failed" in error_msg.lower()
+                or "invalid credentials" in error_msg.lower()
+            ):
+                return {
+                    "success": False,
+                    "message": "Authentication failed. Please check your email address and password.",
+                }
+            if "connection refused" in error_msg.lower() or "timeout" in error_msg.lower():
+                return {
+                    "success": False,
+                    "message": f"Could not connect to {imap_server}. Please check the server address and port.",
+                }
+            return {
+                "success": False,
+                "message": f"Connection error: {error_msg}",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error: {str(e)}",
+            }
+
+    @classmethod
+    async def fetch_type_data(cls, instance_id: str | None = None) -> dict[str, Any] | None:
+        """Manually trigger an IMAP fetch using a loaded backend instance."""
+        from app.models.db_models import PluginDB
+        from app.plugins.manager import plugin_manager
+
+        if instance_id:
+            db_plugin = await PluginDB.objects.get_or_none(id=instance_id)
+            imap_plugins_db = [db_plugin] if db_plugin and db_plugin.type_id == "imap" else []
+        else:
+            imap_plugins_db = await PluginDB.objects.filter(type_id="imap").all()
+
+        if not imap_plugins_db:
+            return {
+                "success": False,
+                "message": "IMAP plugin instance not found. Please configure and enable the IMAP plugin first.",
+                "images_downloaded": 0,
+            }
+
+        imap_plugin = None
+        for db_plugin in imap_plugins_db:
+            plugin = plugin_manager.get_plugin(db_plugin.id)
+            if isinstance(plugin, cls):
+                imap_plugin = plugin
+                break
+
+        if not imap_plugin:
+            return {
+                "success": False,
+                "message": "IMAP plugin instance found in database but not loaded. Please restart the application.",
+                "images_downloaded": 0,
+            }
+
+        result = await imap_plugin.run_scheduled_task()
+        return {
+            "success": result.get("success", False),
+            "message": result.get("message", ""),
+            "images_downloaded": result.get("data", {}).get("images_downloaded", 0),
+        }
 
     async def configure(self, config: dict[str, Any]) -> None:
         """Configure the plugin with new settings."""
@@ -463,28 +560,42 @@ class ImapBackendPlugin(BackendPlugin):
         old_check_interval = self.check_interval
 
         if "email_address" in config:
-            self.email_address = extract_config_value(config, "email_address", default="", converter=to_str)
+            self.email_address = extract_config_value(
+                config, "email_address", default="", converter=to_str
+            )
 
         if "email_password" in config:
-            self.email_password = extract_config_value(config, "email_password", default="", converter=to_str)
+            self.email_password = extract_config_value(
+                config, "email_password", default="", converter=to_str
+            )
 
         if "imap_server" in config:
-            self.imap_server = extract_config_value(config, "imap_server", default="imap.gmail.com", converter=to_str)
+            self.imap_server = extract_config_value(
+                config, "imap_server", default="imap.gmail.com", converter=to_str
+            )
 
         if "imap_port" in config:
-            self.imap_port = extract_config_value(config, "imap_port", default=993, converter=to_int)
+            self.imap_port = extract_config_value(
+                config, "imap_port", default=993, converter=to_int
+            )
 
         if "target_directory" in config:
-            target_dir = extract_config_value(config, "target_directory", default="", converter=to_str)
+            target_dir = extract_config_value(
+                config, "target_directory", default="", converter=to_str
+            )
             if target_dir and target_dir.strip():
                 self.target_directory = Path(target_dir).resolve()
                 self.target_directory.mkdir(parents=True, exist_ok=True)
 
         if "check_interval" in config:
-            self.check_interval = extract_config_value(config, "check_interval", default=300, converter=to_int)
+            self.check_interval = extract_config_value(
+                config, "check_interval", default=300, converter=to_int
+            )
 
         if "mark_as_read" in config:
-            mark_as_read = extract_config_value(config, "mark_as_read", default=True, converter=to_bool)
+            mark_as_read = extract_config_value(
+                config, "mark_as_read", default=True, converter=to_bool
+            )
             # Handle string values like "true"/"false" that might come from UI
             if isinstance(mark_as_read, str):
                 self.mark_as_read = mark_as_read.lower() in ("true", "1", "yes")
@@ -533,14 +644,20 @@ def create_plugin_instance(
     # Extract config values using utility functions
     email_address = extract_config_value(config, "email_address", default="", converter=to_str)
     email_password = extract_config_value(config, "email_password", default="", converter=to_str)
-    imap_server = extract_config_value(config, "imap_server", default="imap.gmail.com", converter=to_str)
+    imap_server = extract_config_value(
+        config, "imap_server", default="imap.gmail.com", converter=to_str
+    )
     imap_port = extract_config_value(config, "imap_port", default=993, converter=to_int)
     check_interval = extract_config_value(config, "check_interval", default=300, converter=to_int)
-    
+
     # Handle target_directory (Path or None)
-    target_directory = extract_config_value(config, "target_directory", default="", converter=to_str)
-    target_directory = Path(target_directory) if target_directory and target_directory.strip() else None
-    
+    target_directory = extract_config_value(
+        config, "target_directory", default="", converter=to_str
+    )
+    target_directory = (
+        Path(target_directory) if target_directory and target_directory.strip() else None
+    )
+
     # Handle mark_as_read (bool, may come as string)
     mark_as_read = extract_config_value(config, "mark_as_read", default=True, converter=to_bool)
     if isinstance(mark_as_read, str):
@@ -563,128 +680,6 @@ def create_plugin_instance(
 
 
 @hookimpl
-async def test_plugin_connection(
-    type_id: str,
-    config: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Test IMAP connection."""
-    if type_id != "imap":
-        return None
-
-    import imaplib
-
-    email_address = config.get("email_address", "")
-    email_password = config.get("email_password", "")
-    imap_server = config.get("imap_server", "imap.gmail.com")
-    imap_port = int(config.get("imap_port", 993))
-
-    if not email_address or not email_password:
-        return {
-            "success": False,
-            "message": "Email address and password are required",
-        }
-
-    try:
-        # Test connection
-        mail = imaplib.IMAP4_SSL(imap_server, imap_port)
-        mail.login(email_address, email_password)
-        mail.select("INBOX")
-        mail.close()
-        mail.logout()
-
-        return {
-            "success": True,
-            "message": f"Successfully connected to {imap_server}",
-        }
-    except imaplib.IMAP4.error as e:
-        error_msg = str(e)
-        if (
-            "authentication failed" in error_msg.lower()
-            or "invalid credentials" in error_msg.lower()
-        ):
-            return {
-                "success": False,
-                "message": "Authentication failed. Please check your email address and password.",
-            }
-        elif "connection refused" in error_msg.lower() or "timeout" in error_msg.lower():
-            return {
-                "success": False,
-                "message": f"Could not connect to {imap_server}. Please check the server address and port.",  # noqa: E501
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"Connection error: {error_msg}",
-            }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error: {str(e)}",
-        }
-
-
-@hookimpl
-async def fetch_plugin_data(
-    type_id: str,
-    instance_id: str | None = None,
-) -> dict[str, Any] | None:
-    """Manually trigger IMAP email check."""
-    if type_id != "imap":
-        return None
-
-    from sqlalchemy import select
-
-    from app.database import AsyncSessionLocal
-    from app.models.db_models import PluginDB
-    from app.plugins.base import PluginType
-    from app.plugins.manager import plugin_manager
-    from app.plugins.protocols import BackendPlugin
-
-    # Find IMAP plugin instance
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(PluginDB).where(PluginDB.type_id == "imap"))
-        imap_plugins_db = result.scalars().all()
-
-    if not imap_plugins_db:
-        return {
-            "success": False,
-            "message": "IMAP plugin instance not found. Please configure and enable the IMAP plugin first.",  # noqa: E501
-            "images_downloaded": 0,
-        }
-
-    # Try to find the plugin instance from plugin manager
-    imap_plugin = None
-    for db_plugin in imap_plugins_db:
-        plugin = plugin_manager.get_plugin(db_plugin.id)
-        if plugin and isinstance(plugin, BackendPlugin) and plugin.__class__.__name__ == "ImapBackendPlugin":
-            imap_plugin = plugin
-            break
-
-    # If not found by ID, try to find by class name
-    if not imap_plugin:
-        plugins = plugin_manager.get_plugins(PluginType.BACKEND, enabled_only=False)
-        for plugin in plugins:
-            if plugin.__class__.__name__ == "ImapBackendPlugin":
-                imap_plugin = plugin
-                break
-
-    if not imap_plugin:
-        return {
-            "success": False,
-            "message": "IMAP plugin instance found in database but not loaded. Please restart the application.",  # noqa: E501
-            "images_downloaded": 0,
-        }
-
-    # Run the scheduled task manually
-    result = await imap_plugin.run_scheduled_task()
-    return {
-        "success": result.get("success", False),
-        "message": result.get("message", ""),
-        "images_downloaded": result.get("data", {}).get("images_downloaded", 0),
-    }
-
-
-@hookimpl
 async def handle_plugin_config_update(
     type_id: str,
     config: dict[str, Any],
@@ -704,11 +699,13 @@ async def handle_plugin_config_update(
         """Normalize config values."""
         email_address = extract_config_value(c, "email_address", default="", converter=to_str)
         email_password = extract_config_value(c, "email_password", default="", converter=to_str)
-        imap_server = extract_config_value(c, "imap_server", default="imap.gmail.com", converter=to_str)
+        imap_server = extract_config_value(
+            c, "imap_server", default="imap.gmail.com", converter=to_str
+        )
         imap_port = extract_config_value(c, "imap_port", default=993, converter=to_int)
         check_interval = extract_config_value(c, "check_interval", default=300, converter=to_int)
         target_directory = extract_config_value(c, "target_directory", default="", converter=to_str)
-        
+
         # Handle mark_as_read (may come as string "true"/"false")
         mark_as_read = extract_config_value(c, "mark_as_read", default=True, converter=to_bool)
         if isinstance(mark_as_read, str):
@@ -758,7 +755,7 @@ async def handle_plugin_config_update(
         # Generate unique instance ID based on email address and server
         email_address = c.get("email_address", "")
         imap_server = c.get("imap_server", "imap.gmail.com")
-        
+
         # Create a hash from email and server to generate unique ID
         config_str = f"{email_address}_{imap_server}"
         config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
@@ -767,14 +764,14 @@ async def handle_plugin_config_update(
     def prepare_instance_config(c: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
         """Prepare final config for instance creation."""
         instance_config = c.copy()
-        
+
         # Use instance name from metadata or generate default
         email_address = c.get("email_address", "")
         if not metadata.get("instance_name"):
             instance_config["_instance_name"] = f"IMAP Email ({email_address})"
         else:
             instance_config["_instance_name"] = metadata["instance_name"]
-        
+
         return instance_config
 
     manager_config = InstanceManagerConfig(

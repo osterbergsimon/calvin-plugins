@@ -13,13 +13,15 @@ import pytest
 # In a real scenario, you'd run these tests in the calvin backend context
 try:
     from app.plugins.base import PluginType
-    
+
     # Import the plugin
     import sys
     from pathlib import Path
+
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("weather_plugin", plugin_path)
         if spec and spec.loader:
             weather_module = importlib.util.module_from_spec(spec)
@@ -103,7 +105,10 @@ class TestWeatherServicePlugin:
         """Test plugin initialization."""
         await weather_plugin.initialize()
         assert weather_plugin._client is not None
-        assert str(weather_plugin._client.base_url).rstrip("/") == "https://api.openweathermap.org/data/2.5"
+        assert (
+            str(weather_plugin._client.base_url).rstrip("/")
+            == "https://api.openweathermap.org/data/2.5"
+        )
 
     @pytest.mark.asyncio
     async def test_initialize_missing_api_key(self):
@@ -143,14 +148,16 @@ class TestWeatherServicePlugin:
         await weather_plugin.initialize()
         original_client = weather_plugin._client
 
-        await weather_plugin.configure({
-            "api_key": "new-key",
-            "location": "New York, US",
-            "units": "imperial",
-            "forecast_days": 5,
-            "display_order": 1,
-            "fullscreen": True,
-        })
+        await weather_plugin.configure(
+            {
+                "api_key": "new-key",
+                "location": "New York, US",
+                "units": "imperial",
+                "forecast_days": 5,
+                "display_order": 1,
+                "fullscreen": True,
+            }
+        )
 
         assert weather_plugin.api_key == "new-key"
         assert weather_plugin.location == "New York, US"
@@ -168,12 +175,14 @@ class TestWeatherServicePlugin:
         await weather_plugin.initialize()  # Initialize first so we have a client
         original_location = weather_plugin.location
         original_api_key = weather_plugin.api_key
-        
-        await weather_plugin.configure({
-            "api_key": original_api_key,  # Must provide required fields
-            "location": original_location,  # Must provide required fields
-            "units": "imperial",
-        })
+
+        await weather_plugin.configure(
+            {
+                "api_key": original_api_key,  # Must provide required fields
+                "location": original_location,  # Must provide required fields
+                "units": "imperial",
+            }
+        )
         assert weather_plugin.location == original_location  # Should remain unchanged
         assert weather_plugin.units == "imperial"
 
@@ -202,46 +211,76 @@ class TestWeatherServicePlugin:
     @pytest.mark.asyncio
     async def test_validate_config_valid(self, weather_plugin):
         """Test config validation with valid config."""
-        assert await weather_plugin.validate_config({
-            "api_key": "test-key",
-            "location": "London, UK",
-        }) is True
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "api_key": "test-key",
+                    "location": "London, UK",
+                }
+            )
+            is True
+        )
 
         # Test with string values
-        assert await weather_plugin.validate_config({
-            "api_key": "test-key",
-            "location": "London, UK",
-        }) is True
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "api_key": "test-key",
+                    "location": "London, UK",
+                }
+            )
+            is True
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_api_key(self, weather_plugin):
         """Test config validation with missing api_key."""
-        assert await weather_plugin.validate_config({
-            "location": "London, UK",
-        }) is False
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "location": "London, UK",
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_empty_api_key(self, weather_plugin):
         """Test config validation with empty api_key."""
-        assert await weather_plugin.validate_config({
-            "api_key": "",
-            "location": "London, UK",
-        }) is False
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "api_key": "",
+                    "location": "London, UK",
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_location(self, weather_plugin):
         """Test config validation with missing location."""
-        assert await weather_plugin.validate_config({
-            "api_key": "test-key",
-        }) is False
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "api_key": "test-key",
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_config_empty_location(self, weather_plugin):
         """Test config validation with empty location."""
-        assert await weather_plugin.validate_config({
-            "api_key": "test-key",
-            "location": "",
-        }) is False
+        assert (
+            await weather_plugin.validate_config(
+                {
+                    "api_key": "test-key",
+                    "location": "",
+                }
+            )
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_fetch_service_data(self, weather_plugin):
@@ -268,6 +307,7 @@ class TestWeatherServicePlugin:
 
         # Mock forecast response
         from datetime import datetime, timedelta
+
         now = datetime.now()
         mock_forecast_response = MagicMock()
         mock_forecast_response.json.return_value = {
@@ -286,10 +326,12 @@ class TestWeatherServicePlugin:
         }
         mock_forecast_response.raise_for_status = MagicMock()
 
-        mock_client.get = AsyncMock(side_effect=[
-            mock_current_response,
-            mock_forecast_response,
-        ])
+        mock_client.get = AsyncMock(
+            side_effect=[
+                mock_current_response,
+                mock_forecast_response,
+            ]
+        )
 
         weather_data = await weather_plugin.fetch_service_data()
 
@@ -298,18 +340,28 @@ class TestWeatherServicePlugin:
         assert weather_data["current"]["temperature"] == 15.5
         assert weather_data["units"] == "metric"
 
+    @pytest.mark.asyncio
+    async def test_test_type_config_missing_values(self):
+        result = await WeatherServicePlugin.test_type_config({"api_key": ""})
+        assert result["success"] is False
+        assert "required" in result["message"].lower()
+
 
 class TestWeatherServicePluginHooks:
     """Tests for Weather Service plugin hooks."""
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead.")
+    @pytest.mark.skip(
+        reason="Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead."
+    )
     async def test_handle_plugin_config_update(self, test_db):
         """Test Weather Service plugin handle_plugin_config_update hook.
-        
-        Note: This test requires backend fixtures (test_db). 
+
+        Note: This test requires backend fixtures (test_db).
         Run the hook integration test from backend/tests/unit/test_plugin_hooks.py instead:
-        
+
             pytest backend/tests/unit/test_plugin_hooks.py::TestPluginHooks::test_weather_handle_plugin_config_update
         """
-        pytest.skip("Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead.")
+        pytest.skip(
+            "Backend-dependent hook test. Run from backend/tests/unit/test_plugin_hooks.py instead."
+        )
