@@ -112,6 +112,18 @@ python3 scripts/rebuild-manifest.py
 
 **See [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) for the complete step-by-step guide.**
 
+The recommended path is the scaffold script:
+
+```bash
+python scripts/create_plugin.py <type> <id> [options]
+```
+
+The generated templates are SDK-first for all plugin families:
+- service -> `app.plugins.sdk.service`
+- image -> `app.plugins.sdk.image`
+- calendar -> `app.plugins.sdk.calendar`
+- backend -> `app.plugins.sdk.backend`
+
 Quick checklist:
 1. ✅ Read [CREATING_PLUGINS.md](./CREATING_PLUGINS.md)
 2. ✅ Create plugin/theme directory (e.g., `my-plugin/` or `my-theme/`)

@@ -104,7 +104,16 @@ See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugi
 
 ### Step 3: Create Plugin Implementation (`plugin.py`)
 
-Create `plugin.py` with your plugin implementation. For service plugins, prefer the shared helpers in `app.plugins.sdk.service` and use the generic instance manager for lifecycle handling:
+Create `plugin.py` with your plugin implementation. Prefer the shared SDK helpers in `app.plugins.sdk.*` and use the generic instance manager for lifecycle handling. The scaffold script now generates SDK-first templates for all supported plugin families.
+
+SDK modules by plugin type:
+
+- `service` -> `app.plugins.sdk.service`
+- `image` -> `app.plugins.sdk.image`
+- `calendar` -> `app.plugins.sdk.calendar`
+- `backend` -> `app.plugins.sdk.backend`
+
+Service plugin example:
 
 ```python
 """My custom plugin."""
@@ -246,11 +255,22 @@ async def handle_plugin_config_update(
 
 **Key points:**
 
-1. **Use the service SDK** (`ServiceConfigField`, `build_service_plugin_metadata`, `create_service_plugin_instance`, `build_service_manager_config`) for service plugins
+1. **Use the family SDK** for your plugin type:
+   - `service`: `ServiceConfigField`, `build_service_plugin_metadata`, `create_service_plugin_instance`, `build_service_manager_config`
+   - `image`: `ImageConfigField`, `build_image_plugin_metadata`, `create_image_plugin_instance`, `build_image_manager_config`
+   - `calendar`: `CalendarConfigField`, `build_calendar_plugin_metadata`, `create_calendar_plugin_instance`, `build_calendar_manager_config`
+   - `backend`: `BackendConfigField`, `build_backend_plugin_metadata`, `create_backend_plugin_instance`, `build_backend_manager_config`
 2. **Declare `supports_multiple_instances`** in metadata (`True` for multi-instance, `False` for single-instance)
 3. **Use `instance_config_schema`** for instance-specific settings and `common_config_schema` for plugin-type-level settings (rare)
-4. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation/updates
-5. **Provide `generate_instance_id`** function for multi-instance plugins (optional - defaults to hash-based ID)
+4. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation or updates
+5. **Provide `generate_instance_id`** for multi-instance plugins when the default hash-based ID is not stable enough for your domain
+
+The generated scaffold already wires the correct helper family for each plugin type. In most cases you only need to:
+
+1. Fill in the config field tuple (`SERVICE_FIELDS`, `IMAGE_FIELDS`, `CALENDAR_FIELDS`, or `BACKEND_FIELDS`)
+2. Define `instance_config_schema`
+3. Add your plugin's runtime methods
+4. Tighten `validate_config()` where your plugin needs stronger checks
 
 ### Step 4: Add Frontend Components (Optional)
 
@@ -483,6 +503,8 @@ If adding to this repository:
 
 Provide calendar events from external sources.
 
+**Preferred SDK:** `app.plugins.sdk.calendar`
+
 **Required Methods:**
 - `fetch_events(start_date, end_date)` - Fetch events for a date range
 - `validate_config(config)` - Validate configuration
@@ -495,6 +517,8 @@ Provide calendar events from external sources.
 ### Image Plugins
 
 Provide images from various sources.
+
+**Preferred SDK:** `app.plugins.sdk.image`
 
 **Required Methods:**
 - `get_images()` - Get all available images
@@ -511,6 +535,8 @@ Provide images from various sources.
 
 Display web services, APIs, or custom content.
 
+**Preferred SDK:** `app.plugins.sdk.service`
+
 **Required Methods:**
 - `get_content()` - Get service content for display
 - `validate_config(config)` - Validate configuration
@@ -519,6 +545,20 @@ Display web services, APIs, or custom content.
 - Iframe embeds
 - API-driven displays
 - Webhook receivers
+
+### Backend Plugins
+
+Handle background work, events, or non-visual integrations.
+
+**Preferred SDK:** `app.plugins.sdk.backend`
+
+**Required Methods:**
+- `validate_config(config)` - Validate configuration
+
+**Common Patterns:**
+- task runners
+- mailbox or webhook processors
+- media processing jobs
 
 ## Best Practices
 
