@@ -51,4 +51,4 @@ jobs:
         run: |
           # Run all plugin test files from the backend directory
           # pytest will discover and run all test_*.py files in calvin-plugins
-          uv run pytest ../calvin-plugins -v --tb=short
+          uv run pytest ../../calvin-plugins -v --tb=short
