@@ -22,7 +22,7 @@ except ImportError as exc:
 
 
 @pytest.mark.asyncio
-async def test_get_image_data_uses_shared_fetch_helper():
+async def test_get_image_data_uses_gallery_base_fetch():
     plugin = LycheeImagePlugin(
         plugin_id="lychee-instance",
         name="Lychee",
@@ -39,7 +39,11 @@ async def test_get_image_data_uses_shared_fetch_helper():
     ]
     plugin._last_scan = datetime.now()
 
-    with patch.object(lychee_module, "fetch_image_data", new_callable=AsyncMock) as mock_fetch:
+    with patch.object(
+        LycheeImagePlugin,
+        "fetch_protected_image_data",
+        new_callable=AsyncMock,
+    ) as mock_fetch:
         mock_fetch.return_value = b"image-data"
 
         data = await plugin.get_image_data("lychee-photo123")
@@ -47,7 +51,21 @@ async def test_get_image_data_uses_shared_fetch_helper():
         assert data == b"image-data"
         mock_fetch.assert_awaited_once_with(
             "https://photos.example.com/uploads/photo123.jpg",
-            plugin_name="Lychee",
-            headers={"Authorization": "Bearer secret", "Accept": "application/json"},
-            follow_redirects=True,
         )
+
+
+def test_lychee_uses_gallery_base_helpers():
+    plugin = LycheeImagePlugin(
+        plugin_id="lychee-instance",
+        name="Lychee",
+        url="https://photos.example.com/",
+        api_key="secret",
+        album_id="",
+        enabled=True,
+    )
+
+    assert plugin.auth_headers() == {
+        "Authorization": "Bearer secret",
+        "Accept": "application/json",
+    }
+    assert plugin.api_url("Album") == "https://photos.example.com/api/v2/Album"

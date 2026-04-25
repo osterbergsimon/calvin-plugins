@@ -8,8 +8,7 @@ from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
-from app.plugins.protocols import ImagePlugin
-from app.plugins.sdk.image import fetch_image_data
+from app.plugins.sdk.image import SelfHostedGalleryImagePlugin
 from app.plugins.utils.config import extract_config_value, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
@@ -20,8 +19,12 @@ from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 _SCAN_INTERVAL = 3600  # Refresh once per hour
 
 
-class ImmichImagePlugin(ImagePlugin):
+class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
     """Image plugin that serves photos from a self-hosted Immich instance."""
+
+    sdk_plugin_name = "Immich"
+    api_base_path = "/api"
+    auth_header_name = "x-api-key"
 
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
@@ -89,22 +92,9 @@ class ImmichImagePlugin(ImagePlugin):
         count: int = 30,
         enabled: bool = True,
     ):
-        super().__init__(plugin_id, name, enabled)
-        self.base_url = url.rstrip("/")
-        self.api_key = api_key
+        super().__init__(plugin_id, name, url=url, api_key=api_key, enabled=enabled)
         self.album_id = album_id
         self.count = count
-        self._images: list[dict[str, Any]] = []
-        self._last_scan: datetime | None = None
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "x-api-key": self.api_key,
-            "Accept": "application/json",
-        }
-
-    def _api(self, path: str) -> str:
-        return f"{self.base_url}/api/{path.lstrip('/')}"
 
     async def initialize(self) -> None:
         cached_images, cached_time = load_scan_cache(self.plugin_id)
@@ -127,12 +117,8 @@ class ImmichImagePlugin(ImagePlugin):
     async def get_image_data(self, image_id: str) -> bytes | None:
         # Strip our "immich-" prefix to get the real Immich asset ID
         asset_id = image_id.removeprefix("immich-")
-        url = self._api(f"assets/{asset_id}/original")
-        return await fetch_image_data(
-            url,
-            plugin_name="Immich",
-            headers=self._headers(),
-            follow_redirects=True,
+        return await self.fetch_protected_image_data(
+            self.api_url(f"assets/{asset_id}/original")
         )
 
     async def scan_images(self) -> list[dict[str, Any]]:
@@ -162,8 +148,8 @@ class ImmichImagePlugin(ImagePlugin):
         async with httpx.AsyncClient(timeout=30.0) as client:
             if self.album_id:
                 response = await client.get(
-                    self._api(f"albums/{self.album_id}"),
-                    headers=self._headers(),
+                    self.api_url(f"albums/{self.album_id}"),
+                    headers=self.auth_headers(),
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -175,9 +161,9 @@ class ImmichImagePlugin(ImagePlugin):
             else:
                 # Use the random endpoint — most efficient for slideshow use
                 response = await client.get(
-                    self._api("assets/random"),
+                    self.api_url("assets/random"),
                     params={"count": self.count},
-                    headers=self._headers(),
+                    headers=self.auth_headers(),
                 )
                 response.raise_for_status()
                 return response.json()
@@ -189,8 +175,8 @@ class ImmichImagePlugin(ImagePlugin):
         return {
             "id": f"immich-{asset_id}",
             "filename": asset.get("originalFileName", asset_id),
-            "url": self._api(f"assets/{asset_id}/thumbnail?size=preview"),
-            "raw_url": self._api(f"assets/{asset_id}/original"),
+            "url": self.api_url(f"assets/{asset_id}/thumbnail?size=preview"),
+            "raw_url": self.api_url(f"assets/{asset_id}/original"),
             "width": exif.get("exifImageWidth", 0),
             "height": exif.get("exifImageHeight", 0),
             "size": asset.get("fileSize", 0),
@@ -211,7 +197,7 @@ class ImmichImagePlugin(ImagePlugin):
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     f"{url}/api/server/ping",
-                    headers={"x-api-key": api_key, "Accept": "application/json"},
+                    headers=self.build_auth_headers(api_key),
                 )
                 return response.status_code == 200
         except httpx.HTTPError:

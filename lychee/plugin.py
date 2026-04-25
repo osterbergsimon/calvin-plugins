@@ -9,8 +9,7 @@ from loguru import logger
 
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
-from app.plugins.protocols import ImagePlugin
-from app.plugins.sdk.image import fetch_image_data
+from app.plugins.sdk.image import SelfHostedGalleryImagePlugin
 from app.plugins.utils.config import extract_config_value, to_str, to_int
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
@@ -21,8 +20,13 @@ from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 _SCAN_INTERVAL = 3600  # Re-fetch album listing every hour
 
 
-class LycheeImagePlugin(ImagePlugin):
+class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
     """Image plugin that serves photos from a Lychee gallery instance."""
+
+    sdk_plugin_name = "Lychee"
+    api_base_path = "/api/v2"
+    auth_header_name = "Authorization"
+    auth_header_prefix = "Bearer "
 
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
@@ -78,21 +82,8 @@ class LycheeImagePlugin(ImagePlugin):
         album_id: str = "",
         enabled: bool = True,
     ):
-        super().__init__(plugin_id, name, enabled)
-        self.base_url = url.rstrip("/")
-        self.api_key = api_key
+        super().__init__(plugin_id, name, url=url, api_key=api_key, enabled=enabled)
         self.album_id = album_id
-        self._images: list[dict[str, Any]] = []
-        self._last_scan: datetime | None = None
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-        }
-
-    def _api(self, path: str) -> str:
-        return f"{self.base_url}/api/v2/{path.lstrip('/')}"
 
     async def initialize(self) -> None:
         cached_images, cached_time = load_scan_cache(self.plugin_id)
@@ -119,12 +110,7 @@ class LycheeImagePlugin(ImagePlugin):
         url = image.get("url")
         if not url:
             return None
-        return await fetch_image_data(
-            url,
-            plugin_name="Lychee",
-            headers=self._headers(),
-            follow_redirects=True,
-        )
+        return await self.fetch_protected_image_data(url)
 
     async def scan_images(self) -> list[dict[str, Any]]:
         if not self.base_url or not self.api_key:
@@ -154,9 +140,9 @@ class LycheeImagePlugin(ImagePlugin):
         async with httpx.AsyncClient(timeout=30.0) as client:
             if self.album_id:
                 response = await client.post(
-                    self._api("Album"),
+                    self.api_url("Album"),
                     json={"albumID": self.album_id},
-                    headers=self._headers(),
+                    headers=self.auth_headers(),
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -164,8 +150,8 @@ class LycheeImagePlugin(ImagePlugin):
             else:
                 # Fetch root albums then collect photos from each
                 response = await client.post(
-                    self._api("Albums"),
-                    headers=self._headers(),
+                    self.api_url("Albums"),
+                    headers=self.auth_headers(),
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -177,9 +163,9 @@ class LycheeImagePlugin(ImagePlugin):
                     if not album_id:
                         continue
                     album_resp = await client.post(
-                        self._api("Album"),
+                        self.api_url("Album"),
                         json={"albumID": album_id},
-                        headers=self._headers(),
+                        headers=self.auth_headers(),
                     )
                     if album_resp.status_code == 200:
                         album_data = album_resp.json()
@@ -226,7 +212,7 @@ class LycheeImagePlugin(ImagePlugin):
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
                     f"{url}/api/v2/Albums",
-                    headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                    headers=self.build_auth_headers(api_key),
                 )
                 return response.status_code == 200
         except httpx.HTTPError:
