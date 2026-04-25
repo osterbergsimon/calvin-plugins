@@ -4,10 +4,32 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.sdk.image import (
+    ImageConfigField,
+    build_image_manager_config,
+    build_image_plugin_metadata,
+    create_image_plugin_instance,
+    fetch_image_data,
+)
+from app.plugins.utils.config import extract_config_value, to_int, to_str
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
+
+
+IMAGE_FIELDS = (
+    ImageConfigField(
+        "api_key",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.strip() or None if value else None,
+    ),
+    ImageConfigField("category", default="popular", converter=to_str),
+    ImageConfigField("count", default=30, converter=to_int),
+)
 
 
 class UnsplashImagePlugin(ImagePlugin):
@@ -16,13 +38,13 @@ class UnsplashImagePlugin(ImagePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "unsplash",
-            "plugin_type": PluginType.IMAGE,
-            "name": "Unsplash",
-            "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
-            "version": "1.0.0",
-            "common_config_schema": {
+        return build_image_plugin_metadata(
+            type_id="unsplash",
+            name="Unsplash",
+            description="Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
+            plugin_class=cls,
+            supports_multiple_instances=False,
+            common_config_schema={
                 "api_key": {
                     "type": "password",
                     "description": "Unsplash API key (required). Get one at https://unsplash.com/developers",
@@ -62,8 +84,8 @@ class UnsplashImagePlugin(ImagePlugin):
                     },
                 },
             },
-            "plugin_class": cls,
-        }
+            instance_config_schema={},
+        )
 
     def __init__(
         self,
@@ -96,6 +118,10 @@ class UnsplashImagePlugin(ImagePlugin):
 
     async def initialize(self) -> None:
         """Initialize the plugin."""
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -146,15 +172,10 @@ class UnsplashImagePlugin(ImagePlugin):
         if not image_url:
             return None
 
-        # Fetch the image
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(image_url)
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                print(f"Error fetching image from Unsplash: {e}")
-                return None
+        return await fetch_image_data(
+            image_url,
+            plugin_name="Unsplash",
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         """
@@ -189,7 +210,9 @@ class UnsplashImagePlugin(ImagePlugin):
             else:
                 # Without API key, we'll get rate limited quickly
                 # For testing, we can use a demo access key or just handle errors gracefully
-                print("Warning: Unsplash plugin used without API key. Rate limits will apply.")
+                logger.warning(
+                    "[Unsplash] Plugin used without API key. Rate limits will apply."
+                )
                 # Try to use demo access (this may not work without proper setup)
                 # In production, users should provide their own API key
 
@@ -222,6 +245,7 @@ class UnsplashImagePlugin(ImagePlugin):
                     "id": image_id,
                     "filename": f"{photo['id']}.jpg",
                     "path": regular_url,
+                    "url": regular_url,
                     "raw_url": raw_url,
                     "width": width,
                     "height": height,
@@ -240,28 +264,28 @@ class UnsplashImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                print(
+                logger.error(
                     "Error: Unsplash API requires authentication. Please provide an API key in plugin settings."  # noqa: E501
                 )
             elif e.response.status_code == 403:
-                print("Error: Unsplash API access forbidden. Check your API key.")
+                logger.error("[Unsplash] API access forbidden. Check your API key.")
             else:
-                print(f"HTTP error fetching photos from Unsplash: {e.response.status_code} - {e}")
+                logger.warning(
+                    f"[Unsplash] HTTP error fetching photos: {e.response.status_code} - {e}"
+                )
             # Return cached images if available
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"Error fetching photos from Unsplash: {e}")
+            logger.warning(f"[Unsplash] Request error fetching photos: {e}")
             # Return cached images if available
             return self._images.copy()
         except Exception as e:
-            print(f"Unexpected error in Unsplash plugin: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(f"[Unsplash] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
@@ -275,24 +299,24 @@ class UnsplashImagePlugin(ImagePlugin):
             True if configuration is valid
         """
         # API key is optional, but if provided should be a string
-        if "api_key" in config and config["api_key"]:
-            if not isinstance(config["api_key"], str):
+        if "api_key" in config:
+            api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+            if api_key and not isinstance(api_key, str):
                 return False
 
         # Category should be one of the valid options
         if "category" in config:
+            category = extract_config_value(config, "category", default="popular", converter=to_str)
             valid_categories = ["popular", "latest", "oldest"]
-            if config["category"] not in valid_categories:
+            if category not in valid_categories:
                 return False
 
-        # Count should be a positive integer
+        # Count should be a positive integer between 1 and 100
         if "count" in config:
-            try:
-                count = int(config["count"])
-                if count < 1 or count > 100:  # Unsplash API limit
-                    return False
-            except (ValueError, TypeError):
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            if count < 1 or count > 100:  # Unsplash API limit
                 return False
+            # Also validate in configure method, but here we just check range
 
         return True
 
@@ -306,11 +330,16 @@ class UnsplashImagePlugin(ImagePlugin):
         await super().configure(config)
 
         if "api_key" in config:
-            self.api_key = config["api_key"]
+            api_key = extract_config_value(config, "api_key", default="", converter=to_str)
+            # Convert empty string or whitespace-only to None
+            self.api_key = api_key.strip() if api_key and api_key.strip() else None
+
         if "category" in config:
-            self.category = config["category"]
+            self.category = extract_config_value(config, "category", default="popular", converter=to_str)
+
         if "count" in config:
-            self.count = int(config["count"])
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            self.count = min(count, 100)  # Cap at 100 (Unsplash API limit)
 
         # Reset scan cache when config changes
         self._last_scan = None
@@ -331,39 +360,39 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> UnsplashImagePlugin | None:
     """Create an UnsplashImagePlugin instance."""
+    return create_image_plugin_instance(
+        UnsplashImagePlugin,
+        expected_type_id="unsplash",
+        plugin_id=plugin_id,
+        type_id=type_id,
+        name=name,
+        config=config,
+        fields=IMAGE_FIELDS,
+    )
+
+
+@hookimpl
+async def handle_plugin_config_update(
+    type_id: str,
+    config: dict[str, Any],
+    enabled: bool | None,
+    db_type: Any,
+    session: Any,
+) -> dict[str, Any] | None:
+    """Handle Unsplash plugin configuration update and instance management."""
     if type_id != "unsplash":
         return None
 
-    enabled = config.get("enabled", False)  # Default to disabled
+    manager_config = build_image_manager_config(
+        type_id="unsplash",
+        fields=IMAGE_FIELDS,
+        single_instance=True,
+        instance_id="unsplash-instance",
+        default_instance_name="Unsplash",
+    )
 
-    # Extract config values
-    api_key = config.get("api_key", "")
-    category = config.get("category", "popular")
-    count = config.get("count", 30)
-
-    # Handle schema objects
-    if isinstance(api_key, dict):
-        api_key = api_key.get("value") or api_key.get("default") or ""
-    api_key = str(api_key) if api_key else None
-
-    if isinstance(category, dict):
-        category = category.get("value") or category.get("default") or "popular"
-    category = str(category) if category else "popular"
-
-    if isinstance(count, dict):
-        count = count.get("value") or count.get("default") or 30
-    try:
-        count = int(count) if count else 30
-    except (ValueError, TypeError):
-        count = 30
-
-    return UnsplashImagePlugin(
-        plugin_id=plugin_id,
-        name=name,
-        api_key=api_key,
-        category=category,
-        count=count,
-        enabled=enabled,
+    return await handle_plugin_config_update_generic(
+        type_id, config, enabled, db_type, session, manager_config
     )
 
 

@@ -2,6 +2,14 @@
   "version": "1.0.0",
   "plugins": [
     {
+      "id": "chromecast",
+      "name": "Chromecast Now Playing",
+      "path": "chromecast",
+      "description": "Show what's currently casting on any Chromecast on your network \u2014 works with YouTube Music, Spotify, Netflix, Plex and more",
+      "version": "1.0.0",
+      "type": "service"
+    },
+    {
       "id": "imap",
       "name": "Email (IMAP)",
       "path": "imap",
@@ -18,6 +26,22 @@
       "type": "backend"
     },
     {
+      "id": "immich",
+      "name": "Immich",
+      "path": "immich",
+      "description": "Photos from your self-hosted Immich photo library",
+      "version": "1.0.0",
+      "type": "image"
+    },
+    {
+      "id": "lychee",
+      "name": "Lychee",
+      "path": "lychee",
+      "description": "Photos from your self-hosted Lychee photo gallery",
+      "version": "1.0.0",
+      "type": "image"
+    },
+    {
       "id": "mealie",
       "name": "Mealie Meal Plan",
       "path": "mealie",
@@ -26,12 +50,28 @@
       "type": "service"
     },
     {
+      "id": "nasa_apod",
+      "name": "NASA APOD",
+      "path": "nasa-apod",
+      "description": "Astronomy Picture of the Day from NASA \u2014 daily curated space images with titles and descriptions",
+      "version": "1.0.0",
+      "type": "image"
+    },
+    {
       "id": "picsum",
       "name": "Picsum Photos",
       "path": "picsum",
       "description": "Random high-quality images from Picsum Photos (no API key required)",
       "version": "1.0.0",
       "type": "image"
+    },
+    {
+      "id": "system_monitor",
+      "name": "System Monitor",
+      "path": "system-monitor",
+      "description": "Live system metrics \u2014 CPU, memory, disk, temperature and network. Optimised for Raspberry Pi.",
+      "version": "1.0.0",
+      "type": "service"
     },
     {
       "id": "test_plugin",
@@ -56,6 +96,22 @@
       "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
       "version": "1.0.0",
       "type": "image"
+    },
+    {
+      "id": "weather",
+      "name": "Weather",
+      "path": "weather",
+      "description": "Display current weather conditions and forecast from OpenWeatherMap",
+      "version": "1.0.0",
+      "type": "service"
+    },
+    {
+      "id": "yr_weather",
+      "name": "Yr.no Weather",
+      "path": "yr_weather",
+      "description": "Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",
+      "version": "1.0.0",
+      "type": "service"
     }
   ],
   "themes": [

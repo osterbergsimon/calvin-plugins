@@ -1,21 +1,24 @@
 {
   "format_version": "1.0.0",
   "protocol_version": 1,
-  "id": "image-processor",
-  "name": "Image Processor",
+  "id": "chromecast",
+  "name": "Chromecast Now Playing",
   "version": "1.0.0",
-  "type": "backend",
-  "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
+  "type": "service",
+  "description": "Show what's currently casting on any Chromecast on your network — works with YouTube Music, Spotify, Netflix, Plex and more",
   "author": "Calvin Team",
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
   "repository": "https://github.com/calvin-dashboard/calvin-plugins",
   "keywords": [
-    "image",
-    "processor",
-    "events",
-    "backend",
-    "example"
+    "service",
+    "chromecast",
+    "now-playing",
+    "music",
+    "cast"
+  ],
+  "python_dependencies": [
+    "pychromecast>=14.0"
   ],
   "dependencies": {
     "python": ">=3.10",
@@ -24,7 +27,8 @@
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json"
+      "plugin.json",
+      "frontend/NowPlaying.vue"
     ],
     "exclude": [
       "*.md",
@@ -33,7 +37,7 @@
     ]
   },
   "requirements": {
-    "restart_required": false,
+    "restart_required": true,
     "config_required": false
   }
 }

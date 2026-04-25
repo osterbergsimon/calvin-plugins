@@ -1,13 +1,29 @@
 """Picsum Photos image plugin (no API key required)."""
 
+import random
 from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.sdk.image import (
+    ImageConfigField,
+    build_image_manager_config,
+    build_image_plugin_metadata,
+    create_image_plugin_instance,
+    fetch_image_data,
+)
+from app.plugins.utils.config import extract_config_value, to_int
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
+
+
+IMAGE_FIELDS = (
+    ImageConfigField("count", default=30, converter=to_int),
+)
 
 
 class PicsumImagePlugin(ImagePlugin):
@@ -16,13 +32,13 @@ class PicsumImagePlugin(ImagePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "picsum",
-            "plugin_type": PluginType.IMAGE,
-            "name": "Picsum Photos",
-            "description": "Random high-quality images from Picsum Photos (no API key required)",
-            "version": "1.0.0",
-            "common_config_schema": {
+        return build_image_plugin_metadata(
+            type_id="picsum",
+            name="Picsum Photos",
+            description="Random high-quality images from Picsum Photos (no API key required)",
+            plugin_class=cls,
+            supports_multiple_instances=False,
+            common_config_schema={
                 "count": {
                     "type": "string",
                     "description": "Number of photos to fetch (1-100)",
@@ -35,8 +51,8 @@ class PicsumImagePlugin(ImagePlugin):
                     },
                 },
             },
-            "plugin_class": cls,
-        }
+            instance_config_schema={},
+        )
 
     def __init__(
         self,
@@ -63,6 +79,10 @@ class PicsumImagePlugin(ImagePlugin):
 
     async def initialize(self) -> None:
         """Initialize the plugin."""
+        cached_images, cached_time = load_scan_cache(self.plugin_id)
+        if cached_images:
+            self._images = cached_images
+            self._last_scan = cached_time
         await self.scan_images()
 
     async def cleanup(self) -> None:
@@ -113,15 +133,10 @@ class PicsumImagePlugin(ImagePlugin):
         if not image_url:
             return None
 
-        # Fetch the image
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(image_url)
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                print(f"Error fetching image from Picsum: {e}")
-                return None
+        return await fetch_image_data(
+            image_url,
+            plugin_name="Picsum",
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         """
@@ -139,16 +154,34 @@ class PicsumImagePlugin(ImagePlugin):
         try:
             # Use Picsum Photos API to get list of images
             # The /v2/list endpoint returns a list of available images
+            # Since the API doesn't support randomization, we'll:
+            # 1. Fetch from a random page (or multiple pages if needed)
+            # 2. Shuffle the results client-side
+            # 3. Take the requested count
+            
+            # Picsum has ~1000 images, so ~10 pages with 100 per page
+            # Pick a random page to get variety
+            max_page = 10  # Approximate number of pages
+            random_page = random.randint(1, max_page)
+            
+            # Fetch more than needed to have enough for shuffling
+            fetch_limit = min(max(self.count * 2, 50), 100)  # Fetch 2x count or at least 50, max 100
+            
             url = f"{self.base_url}/v2/list"
             params = {
-                "page": 1,
-                "limit": min(self.count, 100),  # Picsum API limit is 100 per page
+                "page": random_page,
+                "limit": fetch_limit,  # Picsum API limit is 100 per page
             }
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 photos = response.json()
+            
+            # Shuffle the photos to randomize the selection
+            random.shuffle(photos)
+            # Take only the requested count
+            photos = photos[:self.count]
 
             # Convert Picsum photos to our image format
             images = []
@@ -193,21 +226,21 @@ class PicsumImagePlugin(ImagePlugin):
 
             self._images = images
             self._last_scan = datetime.now()
+            save_scan_cache(self.plugin_id, images)
             return images
 
         except httpx.HTTPStatusError as e:
-            print(f"HTTP error fetching photos from Picsum: {e.response.status_code} - {e}")
+            logger.warning(
+                f"[Picsum] HTTP error fetching photos: {e.response.status_code} - {e}"
+            )
             # Return cached images if available
             return self._images.copy()
         except httpx.HTTPError as e:
-            print(f"Error fetching photos from Picsum: {e}")
+            logger.warning(f"[Picsum] Request error fetching photos: {e}")
             # Return cached images if available
             return self._images.copy()
         except Exception as e:
-            print(f"Unexpected error in Picsum plugin: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception(f"[Picsum] Unexpected error scanning images: {e}")
             return self._images.copy()
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
@@ -220,13 +253,10 @@ class PicsumImagePlugin(ImagePlugin):
         Returns:
             True if configuration is valid
         """
-        # Count should be a positive integer
+        # Count should be a positive integer between 1 and 100
         if "count" in config:
-            try:
-                count = int(config["count"])
-                if count < 1 or count > 100:  # Picsum API limit
-                    return False
-            except (ValueError, TypeError):
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            if count < 1 or count > 100:  # Picsum API limit
                 return False
 
         return True
@@ -241,7 +271,8 @@ class PicsumImagePlugin(ImagePlugin):
         await super().configure(config)
 
         if "count" in config:
-            self.count = min(int(config["count"]), 100)  # Cap at 100
+            count = extract_config_value(config, "count", default=30, converter=to_int)
+            self.count = min(count, 100)  # Cap at 100
 
         # Reset scan cache when config changes
         self._last_scan = None
@@ -262,27 +293,39 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> PicsumImagePlugin | None:
     """Create a PicsumImagePlugin instance."""
+    return create_image_plugin_instance(
+        PicsumImagePlugin,
+        expected_type_id="picsum",
+        plugin_id=plugin_id,
+        type_id=type_id,
+        name=name,
+        config=config,
+        fields=IMAGE_FIELDS,
+    )
+
+
+@hookimpl
+async def handle_plugin_config_update(
+    type_id: str,
+    config: dict[str, Any],
+    enabled: bool | None,
+    db_type: Any,
+    session: Any,
+) -> dict[str, Any] | None:
+    """Handle Picsum plugin configuration update and instance management."""
     if type_id != "picsum":
         return None
 
-    enabled = config.get("enabled", False)  # Default to disabled
+    manager_config = build_image_manager_config(
+        type_id="picsum",
+        fields=IMAGE_FIELDS,
+        single_instance=True,
+        instance_id="picsum-instance",
+        default_instance_name="Picsum Photos",
+    )
 
-    # Extract config values
-    count = config.get("count", 30)
-
-    # Handle schema objects
-    if isinstance(count, dict):
-        count = count.get("value") or count.get("default") or 30
-    try:
-        count = int(count) if count else 30
-    except (ValueError, TypeError):
-        count = 30
-
-    return PicsumImagePlugin(
-        plugin_id=plugin_id,
-        name=name,
-        count=count,
-        enabled=enabled,
+    return await handle_plugin_config_update_generic(
+        type_id, config, enabled, db_type, session, manager_config
     )
 
 
