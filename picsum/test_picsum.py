@@ -108,9 +108,9 @@ class TestPicsumImagePlugin:
 
             assert len(images) <= picsum_plugin.count
             if len(images) > 0:
-                assert images[0]["id"] == "picsum-1"
-                assert images[0]["source"] == "picsum-instance"
-                assert images[0]["photographer"] == "John Doe"
+                assert {image["id"] for image in images} == {"picsum-1", "picsum-2"}
+                assert all(image["source"] == "picsum-instance" for image in images)
+                assert {image["photographer"] for image in images} == {"John Doe", "Jane Smith"}
 
     @pytest.mark.asyncio
     async def test_scan_images_with_caching(self, picsum_plugin):

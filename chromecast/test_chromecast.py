@@ -58,7 +58,7 @@ class TestChromecastServicePlugin:
 
         with (
             patch.object(chromecast_module, "_PYCHROMECAST_AVAILABLE", True),
-            patch.object(chromecast_module, "pychromecast", fake_pychromecast),
+            patch.object(chromecast_module, "pychromecast", fake_pychromecast, create=True),
             patch("asyncio.get_event_loop") as get_event_loop,
         ):
             loop = MagicMock()
