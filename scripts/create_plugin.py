@@ -122,11 +122,6 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
     tid = to_type_id(plugin_id)
     multi = "False" if single_instance else "True"
 
-    if single_instance:
-        im_args = f'type_id="{tid}", single_instance=True, instance_id="{tid}-instance"'
-    else:
-        im_args = f'type_id="{tid}", single_instance=False'
-
     if plugin_type == "service":
         lines = [
             f'"""{name} plugin."""',
@@ -252,37 +247,77 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         ]
         return "\n".join(lines)
 
+    sdk_config = {
+        "image": {
+            "protocol": "ImagePlugin",
+            "sdk_module": "image",
+            "config_field": "ImageConfigField",
+            "field_group": "IMAGE_FIELDS",
+            "build_metadata": "build_image_plugin_metadata",
+            "create_instance": "create_image_plugin_instance",
+            "build_manager": "build_image_manager_config",
+        },
+        "calendar": {
+            "protocol": "CalendarPlugin",
+            "sdk_module": "calendar",
+            "config_field": "CalendarConfigField",
+            "field_group": "CALENDAR_FIELDS",
+            "build_metadata": "build_calendar_plugin_metadata",
+            "create_instance": "create_calendar_plugin_instance",
+            "build_manager": "build_calendar_manager_config",
+        },
+        "backend": {
+            "protocol": "BackendPlugin",
+            "sdk_module": "backend",
+            "config_field": "BackendConfigField",
+            "field_group": "BACKEND_FIELDS",
+            "build_metadata": "build_backend_plugin_metadata",
+            "create_instance": "create_backend_plugin_instance",
+            "build_manager": "build_backend_manager_config",
+        },
+    }[plugin_type]
+
     lines = [
         f'"""{name} plugin."""',
         "",
         "from typing import Any",
         "",
-        "from app.plugins.base import PluginType",
         "from app.plugins.hooks import hookimpl",
-        f"from app.plugins.protocols import {base}",
-        "from app.plugins.utils.instance_manager import InstanceManagerConfig, handle_plugin_config_update_generic",
+        f'from app.plugins.protocols import {sdk_config["protocol"]}',
+        f'from app.plugins.sdk.{sdk_config["sdk_module"]} import (',
+        f'    {sdk_config["config_field"]},',
+        f'    {sdk_config["build_manager"]},',
+        f'    {sdk_config["build_metadata"]},',
+        f'    {sdk_config["create_instance"]},',
+        ")",
+        "from app.plugins.utils.instance_manager import handle_plugin_config_update_generic",
         "",
         "",
-        f"class {cn}({base}):",
+        f'{sdk_config["field_group"]} = (',
+        "    # TODO: add your config fields here",
+        f'    # {sdk_config["config_field"]}("api_key", default="", converter=str),',
+        ")",
+        "",
+        "",
+        f"class {cn}({sdk_config['protocol']}):",
         f'    """{description}"""',
         "",
         "    @classmethod",
         "    def get_plugin_metadata(cls) -> dict[str, Any]:",
-        "        return {",
-        f'            "type_id": "{tid}",',
-        f'            "plugin_type": PluginType.{plugin_type.upper()},',
-        f'            "name": "{name}",',
-        f'            "description": "{description}",',
-        '            "version": "1.0.0",',
-        f'            "supports_multiple_instances": {multi},',
+        f'        return {sdk_config["build_metadata"]}(',
+        f'            type_id="{tid}",',
+        f'            name="{name}",',
+        f'            description="{description}",',
+        "            plugin_class=cls,",
+        f"            supports_multiple_instances={multi},",
     ]
 
     if instance_label:
-        lines.append(f'            "instance_label": "{instance_label}",')
+        lines.append(f'            instance_label="{instance_label}",')
 
     lines += [
-        '            "common_config_schema": {},',
-        '            "instance_config_schema": {',
+        "            common_config_schema={},",
+        "            instance_config_schema={",
         "                # TODO: add your config fields here",
         '                # "my_field": {',
         '                #     "type": "string",',
@@ -291,12 +326,11 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         '                #     "ui": {"component": "input", "validation": {"required": True}},',
         "                # },",
         "            },",
-        '            "plugin_class": cls,',
-        "        }",
+        "        )",
         "",
         "    def __init__(self, plugin_id: str, name: str, enabled: bool = True):",
         "        super().__init__(plugin_id, name, enabled)",
-        "        # TODO: add instance variables for your config fields",
+        "        # TODO: assign config-backed instance variables",
         "",
         "    async def initialize(self) -> None:",
         "        pass",
@@ -312,7 +346,7 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         "",
         "    async def configure(self, config: dict[str, Any]) -> None:",
         "        await super().configure(config)",
-        "        # TODO: extract config fields with extract_config_value()",
+        "        # TODO: update instance variables from config",
         "",
         "",
         "@hookimpl",
@@ -324,9 +358,22 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         "def create_plugin_instance(",
         "    plugin_id: str, type_id: str, name: str, config: dict[str, Any]",
         f") -> {cn} | None:",
-        f'    if type_id != "{tid}":',
-        "        return None",
-        f'    return {cn}(plugin_id=plugin_id, name=name, enabled=config.get("enabled", False))',
+        f'    return {sdk_config["create_instance"]}(',
+        f"        {cn},",
+    ]
+
+    if plugin_type == "calendar":
+        lines.append(f'        expected_type_ids="{tid}",')
+    else:
+        lines.append(f'        expected_type_id="{tid}",')
+
+    lines += [
+        "        plugin_id=plugin_id,",
+        "        type_id=type_id,",
+        "        name=name,",
+        "        config=config,",
+        f'        fields={sdk_config["field_group"]},',
+        "    )",
         "",
         "",
         "@hookimpl",
@@ -336,8 +383,23 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         f'    if type_id != "{tid}":',
         "        return None",
         "    return await handle_plugin_config_update_generic(",
-        "        type_id, config, enabled, db_type, session,",
-        f"        InstanceManagerConfig({im_args}),",
+        "        type_id,",
+        "        config,",
+        "        enabled,",
+        "        db_type,",
+        "        session,",
+        f'        {sdk_config["build_manager"]}(',
+        f'            type_id="{tid}",',
+        f'            fields={sdk_config["field_group"]},',
+        f"            single_instance={str(single_instance)},",
+    ]
+
+    if single_instance:
+        lines.append(f'            instance_id="{tid}-instance",')
+
+    lines += [
+        f'            default_instance_name="{name}",',
+        "        ),",
         "    )",
         "",
     ]
