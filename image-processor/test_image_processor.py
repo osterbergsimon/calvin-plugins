@@ -64,7 +64,7 @@ class TestImageProcessorPlugin:
         assert metadata["supports_multiple_instances"] is True
         assert "common_config_schema" in metadata
         assert "instance_config_schema" in metadata
-        assert "enabled" in metadata["instance_config_schema"]
+        assert "processing_enabled" in metadata["instance_config_schema"]
         assert "max_width" in metadata["instance_config_schema"]
         assert "max_height" in metadata["instance_config_schema"]
         assert "thumbnail_size" in metadata["instance_config_schema"]
@@ -99,8 +99,10 @@ class TestImageProcessorPlugin:
     @pytest.mark.asyncio
     async def test_get_subscribed_events_enabled(self, image_processor_plugin):
         """Test getting subscribed events when plugin is enabled."""
-        # Mock get_config to return enabled config
-        with patch.object(image_processor_plugin, "get_config", return_value={"enabled": True}):
+        # Mock get_config to return enabled processing config
+        with patch.object(
+            image_processor_plugin, "get_config", return_value={"processing_enabled": True}
+        ):
             events = await image_processor_plugin.get_subscribed_events()
             assert "image_uploaded" in events
 
@@ -113,8 +115,10 @@ class TestImageProcessorPlugin:
 
     @pytest.mark.asyncio
     async def test_get_subscribed_events_config_disabled(self, image_processor_plugin):
-        """Test getting subscribed events when config has enabled=False."""
-        with patch.object(image_processor_plugin, "get_config", return_value={"enabled": False}):
+        """Test getting subscribed events when processing config is disabled."""
+        with patch.object(
+            image_processor_plugin, "get_config", return_value={"processing_enabled": False}
+        ):
             events = await image_processor_plugin.get_subscribed_events()
             assert events == []
 
@@ -160,7 +164,7 @@ class TestImageProcessorPlugin:
             }
 
             with patch.object(image_processor_plugin, "get_config", return_value={
-                "enabled": True,
+                "processing_enabled": True,
                 "resize_enabled": True,
                 "max_width": 1920,
                 "max_height": 1080,
@@ -218,7 +222,7 @@ class TestImageProcessorPlugin:
             }
 
             with patch.object(image_processor_plugin, "get_config", return_value={
-                "enabled": True,
+                "processing_enabled": True,
                 "resize_enabled": False,
                 "generate_thumbnails": False,
             }), patch.object(image_processor_plugin, "emit_event", new_callable=AsyncMock):
@@ -296,7 +300,7 @@ class TestImageProcessorPlugin:
         """Test plugin configuration."""
         # Configure should update the plugin's stored config
         await image_processor_plugin.configure({
-            "enabled": True,
+            "processing_enabled": True,
             "max_width": 2560,
             "max_height": 1440,
             "thumbnail_size": 400,

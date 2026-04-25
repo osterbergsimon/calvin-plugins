@@ -262,8 +262,9 @@ async def handle_plugin_config_update(
    - `backend`: `BackendConfigField`, `build_backend_plugin_metadata`, `create_backend_plugin_instance`, `build_backend_manager_config`
 2. **Declare `supports_multiple_instances`** in metadata (`True` for multi-instance, `False` for single-instance)
 3. **Use `instance_config_schema`** for instance-specific settings and `common_config_schema` for plugin-type-level settings (rare)
-4. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation or updates
-5. **Provide `generate_instance_id`** for multi-instance plugins when the default hash-based ID is not stable enough for your domain
+4. **Do not declare app-managed fields** in either schema. Calvin owns settings such as `display_order`, `enabled`, `name`, `plugin_id`, `type_id`, and metadata/UI keys like `ui_actions`; ordering, naming, identity, and enablement are controlled by the app UI/API, not plugin-generated forms.
+5. **Use `handle_plugin_config_update_generic`** instead of manually managing instance creation or updates
+6. **Provide `generate_instance_id`** for multi-instance plugins when the default hash-based ID is not stable enough for your domain
 
 The generated scaffold already wires the correct helper family for each plugin type. In most cases you only need to:
 

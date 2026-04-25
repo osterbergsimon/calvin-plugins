@@ -78,14 +78,6 @@ class WeatherServicePlugin(ServicePlugin):
                         },
                     },
                 },
-                "display_order": {
-                    "type": "integer",
-                    "description": "Display order for service instances",
-                    "default": 0,
-                    "ui": {
-                        "hidden": True,
-                    },
-                },
             },
             instance_config_schema={
                 "location": {
