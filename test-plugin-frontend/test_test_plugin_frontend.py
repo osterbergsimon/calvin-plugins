@@ -21,11 +21,11 @@ try:
             spec.loader.exec_module(frontend_plugin_module)
             _PluginClass = frontend_plugin_module.TestFrontendServicePlugin
         else:
-            pytest.skip("Could not load test-plugin-frontend plugin module")
+            pytest.skip("Could not load test-plugin-frontend plugin module", allow_module_level=True)
     else:
-        pytest.skip("test-plugin-frontend plugin.py not found")
+        pytest.skip("test-plugin-frontend plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

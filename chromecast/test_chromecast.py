@@ -23,11 +23,11 @@ try:
             spec.loader.exec_module(chromecast_module)
             ChromecastServicePlugin = chromecast_module.ChromecastServicePlugin
         else:
-            pytest.skip("Could not load chromecast plugin module")
+            pytest.skip("Could not load chromecast plugin module", allow_module_level=True)
     else:
-        pytest.skip("chromecast plugin.py not found")
+        pytest.skip("chromecast plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 class TestChromecastServicePlugin:

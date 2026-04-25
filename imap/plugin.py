@@ -174,18 +174,21 @@ class ImapBackendPlugin(BackendPlugin):
                     "type": "save",
                     "label": "Save Settings",
                     "style": "primary",
+                    "scope": "instance",
                 },
                 {
                     "id": "test",
                     "type": "test",
                     "label": "Test Connection",
                     "style": "secondary",
+                    "scope": "instance",
                 },
                 {
                     "id": "fetch",
                     "type": "fetch",
                     "label": "Fetch Now",
                     "style": "secondary",
+                    "scope": "instance",
                 },
             ],
         )

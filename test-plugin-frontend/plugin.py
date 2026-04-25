@@ -32,6 +32,7 @@ class TestFrontendServicePlugin(ServicePlugin):
             name="Test Plugin with Frontend",
             description="A test plugin with frontend components for testing frontend installation",
             plugin_class=cls,
+            supports_multiple_instances=False,
             common_config_schema={
                 "message": {
                     "type": "string",

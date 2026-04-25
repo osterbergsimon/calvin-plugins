@@ -35,11 +35,11 @@ try:
             spec.loader.exec_module(picsum_module)
             PicsumImagePlugin = picsum_module.PicsumImagePlugin
         else:
-            pytest.skip("Could not load picsum plugin module")
+            pytest.skip("Could not load picsum plugin module", allow_module_level=True)
     else:
-        pytest.skip("picsum plugin.py not found")
+        pytest.skip("picsum plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture
@@ -280,7 +280,7 @@ class TestPicsumPluginHooks:
         - handle_plugin_config_update_generic works correctly (tested in test_plugin_instance_manager.py)
         - Plugin hooks correctly call handle_plugin_config_update_generic (tested in test_plugin_hooks.py)
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
+        pytest.skip("Requires backend test fixtures (test_db, allow_module_level=True). "
                    "Run from backend directory: "
                    "cd backend && pytest tests/unit/test_plugin_hooks.py")
 

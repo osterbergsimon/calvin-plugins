@@ -37,11 +37,11 @@ try:
             spec.loader.exec_module(mealie_module)
             MealieServicePlugin = mealie_module.MealieServicePlugin
         else:
-            pytest.skip("Could not load mealie plugin module")
+            pytest.skip("Could not load mealie plugin module", allow_module_level=True)
     else:
-        pytest.skip("mealie plugin.py not found")
+        pytest.skip("mealie plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

@@ -16,9 +16,9 @@ try:
         spec.loader.exec_module(lychee_module)
         LycheeImagePlugin = lychee_module.LycheeImagePlugin
     else:
-        pytest.skip("Could not load lychee plugin module")
+        pytest.skip("Could not load lychee plugin module", allow_module_level=True)
 except ImportError as exc:
-    pytest.skip(f"Backend dependencies not available: {exc}")
+    pytest.skip(f"Backend dependencies not available: {exc}", allow_module_level=True)
 
 
 @pytest.mark.asyncio

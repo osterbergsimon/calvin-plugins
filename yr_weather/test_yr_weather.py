@@ -29,11 +29,11 @@ try:
             YrWeatherServicePlugin = yr_weather_module.YrWeatherServicePlugin
             handle_plugin_config_update = yr_weather_module.handle_plugin_config_update
         else:
-            pytest.skip("Could not load yr_weather plugin module")
+            pytest.skip("Could not load yr_weather plugin module", allow_module_level=True)
     else:
-        pytest.skip("yr_weather plugin.py not found")
+        pytest.skip("yr_weather plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

@@ -36,11 +36,11 @@ try:
             # Pytest collects classes starting with "Test" as test classes
             _PluginClass = test_plugin_module.TestServicePlugin
         else:
-            pytest.skip("Could not load test plugin module")
+            pytest.skip("Could not load test plugin module", allow_module_level=True)
     else:
-        pytest.skip("test plugin.py not found")
+        pytest.skip("test plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture
@@ -179,6 +179,6 @@ class TestTestPluginHooks:
             cd backend
             pytest tests/unit/test_plugin_hooks.py
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
+        pytest.skip("Requires backend test fixtures (test_db, allow_module_level=True). "
                    "Run from backend directory: "
                    "cd backend && pytest tests/unit/test_plugin_hooks.py")

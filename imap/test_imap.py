@@ -38,11 +38,11 @@ try:
             spec.loader.exec_module(imap_module)
             ImapBackendPlugin = imap_module.ImapBackendPlugin
         else:
-            pytest.skip("Could not load imap plugin module")
+            pytest.skip("Could not load imap plugin module", allow_module_level=True)
     else:
-        pytest.skip("imap plugin.py not found")
+        pytest.skip("imap plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

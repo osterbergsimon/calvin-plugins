@@ -35,11 +35,11 @@ try:
             spec.loader.exec_module(unsplash_module)
             UnsplashImagePlugin = unsplash_module.UnsplashImagePlugin
         else:
-            pytest.skip("Could not load unsplash plugin module")
+            pytest.skip("Could not load unsplash plugin module", allow_module_level=True)
     else:
-        pytest.skip("unsplash plugin.py not found")
+        pytest.skip("unsplash plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture
@@ -405,7 +405,7 @@ class TestUnsplashPluginHooks:
         
         These tests verify that plugin hooks correctly call handle_plugin_config_update_generic.
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
+        pytest.skip("Requires backend test fixtures (test_db, allow_module_level=True). "
                    "Run from backend directory: "
                    "cd backend && pytest tests/unit/test_plugin_hooks.py")
 

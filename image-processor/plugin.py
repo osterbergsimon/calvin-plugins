@@ -55,6 +55,7 @@ class ImageProcessorPlugin(BackendPlugin):
             description="Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
             plugin_class=cls,
             supports_multiple_instances=True,
+            instance_label="Processor",
             common_config_schema={},
             instance_config_schema={
                 "processing_enabled": {

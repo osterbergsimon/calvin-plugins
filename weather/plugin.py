@@ -146,12 +146,14 @@ class WeatherServicePlugin(ServicePlugin):
                     "type": "save",
                     "label": "Save Settings",
                     "style": "primary",
+                    "scope": "global",
                 },
                 {
                     "id": "test",
                     "type": "test",
                     "label": "Test Connection",
                     "style": "secondary",
+                    "scope": "instance",
                 },
             ],
             display_schema={

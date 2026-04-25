@@ -16,9 +16,9 @@ try:
         spec.loader.exec_module(nasa_module)
         NasaApodImagePlugin = nasa_module.NasaApodImagePlugin
     else:
-        pytest.skip("Could not load nasa-apod plugin module")
+        pytest.skip("Could not load nasa-apod plugin module", allow_module_level=True)
 except ImportError as exc:
-    pytest.skip(f"Backend dependencies not available: {exc}")
+    pytest.skip(f"Backend dependencies not available: {exc}", allow_module_level=True)
 
 
 @pytest.mark.asyncio

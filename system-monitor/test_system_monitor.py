@@ -23,11 +23,11 @@ try:
             spec.loader.exec_module(system_monitor_module)
             SystemMonitorServicePlugin = system_monitor_module.SystemMonitorServicePlugin
         else:
-            pytest.skip("Could not load system-monitor plugin module")
+            pytest.skip("Could not load system-monitor plugin module", allow_module_level=True)
     else:
-        pytest.skip("system-monitor plugin.py not found")
+        pytest.skip("system-monitor plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

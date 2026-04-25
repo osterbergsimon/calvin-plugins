@@ -140,12 +140,14 @@ class MealieServicePlugin(ServicePlugin):
                     "type": "save",
                     "label": "Save Settings",
                     "style": "primary",
+                    "scope": "instance",
                 },
                 {
                     "id": "test",
                     "type": "test",
                     "label": "Test Connection",
                     "style": "secondary",
+                    "scope": "instance",
                 },
             ],
             display_schema={

@@ -15,9 +15,9 @@ try:
         spec.loader.exec_module(immich_module)
         ImmichImagePlugin = immich_module.ImmichImagePlugin
     else:
-        pytest.skip("Could not load immich plugin module")
+        pytest.skip("Could not load immich plugin module", allow_module_level=True)
 except ImportError as exc:
-    pytest.skip(f"Backend dependencies not available: {exc}")
+    pytest.skip(f"Backend dependencies not available: {exc}", allow_module_level=True)
 
 
 @pytest.mark.asyncio

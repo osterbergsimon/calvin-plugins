@@ -35,11 +35,11 @@ try:
             spec.loader.exec_module(image_processor_module)
             ImageProcessorPlugin = image_processor_module.ImageProcessorPlugin
         else:
-            pytest.skip("Could not load image processor plugin module")
+            pytest.skip("Could not load image processor plugin module", allow_module_level=True)
     else:
-        pytest.skip("image processor plugin.py not found")
+        pytest.skip("image processor plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture
@@ -62,6 +62,7 @@ class TestImageProcessorPlugin:
         assert metadata["plugin_type"] == PluginType.BACKEND
         assert metadata["name"] == "Image Processor"
         assert metadata["supports_multiple_instances"] is True
+        assert metadata["instance_label"] == "Processor"
         assert "common_config_schema" in metadata
         assert "instance_config_schema" in metadata
         assert "processing_enabled" in metadata["instance_config_schema"]
@@ -336,6 +337,6 @@ class TestImageProcessorHooks:
             cd backend
             pytest tests/unit/test_plugin_hooks.py
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
+        pytest.skip("Requires backend test fixtures (test_db, allow_module_level=True). "
                    "Run from backend directory: "
                    "cd backend && pytest tests/unit/test_plugin_hooks.py")
