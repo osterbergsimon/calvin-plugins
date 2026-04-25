@@ -10,13 +10,26 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import BackendPlugin
-from app.plugins.utils.config import extract_config_value, to_bool, to_int
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.backend import (
+    BackendConfigField,
+    build_backend_manager_config,
+    build_backend_plugin_metadata,
+    create_backend_plugin_instance,
 )
+from app.plugins.utils.config import extract_config_value, to_bool, to_int
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 # Loguru automatically includes module/function info in logs
+
+
+BACKEND_FIELDS = (
+    BackendConfigField("enabled", default=True, converter=to_bool),
+    BackendConfigField("resize_enabled", default=True, converter=to_bool),
+    BackendConfigField("max_width", default=1920, converter=to_int),
+    BackendConfigField("max_height", default=1080, converter=to_int),
+    BackendConfigField("generate_thumbnails", default=True, converter=to_bool),
+    BackendConfigField("thumbnail_size", default=300, converter=to_int),
+)
 
 
 class ImageProcessorPlugin(BackendPlugin):
@@ -36,15 +49,14 @@ class ImageProcessorPlugin(BackendPlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "image-processor",
-            "plugin_type": PluginType.BACKEND,
-            "name": "Image Processor",
-            "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,  # Multi-instance plugin
-            "common_config_schema": {},
-            "instance_config_schema": {
+        return build_backend_plugin_metadata(
+            type_id="image-processor",
+            name="Image Processor",
+            description="Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            common_config_schema={},
+            instance_config_schema={
                 "enabled": {
                     "type": "boolean",
                     "description": "Enable image processing",
@@ -94,7 +106,7 @@ class ImageProcessorPlugin(BackendPlugin):
                     },
                 },
             },
-        }
+        )
 
     def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         """Initialize image processor plugin."""
@@ -293,12 +305,15 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> BackendPlugin | None:
     """Create an image processor plugin instance."""
-    if type_id != "image-processor":
-        return None
-
-    enabled = extract_config_value(config, "enabled", default=True, converter=to_bool)
-    plugin = ImageProcessorPlugin(plugin_id, name, enabled)
-    return plugin
+    return create_backend_plugin_instance(
+        ImageProcessorPlugin,
+        expected_type_id="image-processor",
+        plugin_id=plugin_id,
+        type_id=type_id,
+        name=name,
+        config=config,
+        fields=BACKEND_FIELDS,
+    )
 
 
 @hookimpl
@@ -313,17 +328,6 @@ async def handle_plugin_config_update(
     if type_id != "image-processor":
         return None
 
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        return {
-            "enabled": extract_config_value(c, "enabled", default=True, converter=to_bool),
-            "resize_enabled": extract_config_value(c, "resize_enabled", default=True, converter=to_bool),
-            "max_width": extract_config_value(c, "max_width", default=1920, converter=to_int),
-            "max_height": extract_config_value(c, "max_height", default=1080, converter=to_int),
-            "generate_thumbnails": extract_config_value(c, "generate_thumbnails", default=True, converter=to_bool),
-            "thumbnail_size": extract_config_value(c, "thumbnail_size", default=300, converter=to_int),
-        }
-
     def generate_instance_id(c: dict[str, Any], t_id: str) -> str:
         """Generate instance ID from config values."""
         # Create a hash from config to generate unique ID
@@ -332,11 +336,11 @@ async def handle_plugin_config_update(
         config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
         return f"{t_id}-{config_hash}"
 
-    manager_config = InstanceManagerConfig(
+    manager_config = build_backend_manager_config(
         type_id="image-processor",
+        fields=BACKEND_FIELDS,
         single_instance=False,  # Multi-instance plugin
         generate_instance_id=generate_instance_id,
-        normalize_config=normalize_config,
         default_instance_name="Image Processor",
     )
 

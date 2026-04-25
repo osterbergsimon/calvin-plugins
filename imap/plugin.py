@@ -15,13 +15,56 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import BackendPlugin
-from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.backend import (
+    BackendConfigField,
+    build_backend_manager_config,
+    build_backend_plugin_metadata,
+    create_backend_plugin_instance,
+    path_or_none,
 )
+from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 # Loguru automatically includes module/function info in logs
+
+
+BACKEND_FIELDS = (
+    BackendConfigField(
+        "email_address",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.strip() if value else "",
+    ),
+    BackendConfigField(
+        "email_password",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.strip() if value else "",
+    ),
+    BackendConfigField(
+        "imap_server",
+        default="imap.gmail.com",
+        converter=to_str,
+        transform=lambda value: value.strip() if value else "imap.gmail.com",
+    ),
+    BackendConfigField("imap_port", default=993, converter=to_int),
+    BackendConfigField("check_interval", default=300, converter=to_int),
+    BackendConfigField(
+        "target_directory",
+        default="",
+        converter=to_str,
+        transform=path_or_none,
+        arg_name="target_directory",
+    ),
+    BackendConfigField(
+        "mark_as_read",
+        default=True,
+        converter=to_bool,
+        transform=lambda value: value.lower() in ("true", "1", "yes")
+        if isinstance(value, str)
+        else bool(value),
+    ),
+)
 
 
 class ImapBackendPlugin(BackendPlugin):
@@ -35,16 +78,15 @@ class ImapBackendPlugin(BackendPlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "imap",
-            "plugin_type": PluginType.BACKEND,
-            "name": "Email (IMAP)",
-            "description": "Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share → Email.",  # noqa: E501
-            "version": "1.0.0",
-            "supports_multiple_instances": True,  # Multi-instance plugin
-            "instance_label": "Email Account",
-            "common_config_schema": {},
-            "instance_config_schema": {
+        return build_backend_plugin_metadata(
+            type_id="imap",
+            name="Email (IMAP)",
+            description="Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share → Email.",  # noqa: E501
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            instance_label="Email Account",
+            common_config_schema={},
+            instance_config_schema={
                 "email_address": {
                     "type": "string",
                     "description": "Email address to check for images",
@@ -126,7 +168,7 @@ class ImapBackendPlugin(BackendPlugin):
                     },
                 },
             },
-            "ui_actions": [
+            ui_actions=[
                 {
                     "id": "save",
                     "type": "save",
@@ -146,8 +188,7 @@ class ImapBackendPlugin(BackendPlugin):
                     "style": "secondary",
                 },
             ],
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -636,46 +677,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> ImapBackendPlugin | None:
     """Create an ImapBackendPlugin instance."""
-    if type_id != "imap":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-
-    # Extract config values using utility functions
-    email_address = extract_config_value(config, "email_address", default="", converter=to_str)
-    email_password = extract_config_value(config, "email_password", default="", converter=to_str)
-    imap_server = extract_config_value(
-        config, "imap_server", default="imap.gmail.com", converter=to_str
-    )
-    imap_port = extract_config_value(config, "imap_port", default=993, converter=to_int)
-    check_interval = extract_config_value(config, "check_interval", default=300, converter=to_int)
-
-    # Handle target_directory (Path or None)
-    target_directory = extract_config_value(
-        config, "target_directory", default="", converter=to_str
-    )
-    target_directory = (
-        Path(target_directory) if target_directory and target_directory.strip() else None
-    )
-
-    # Handle mark_as_read (bool, may come as string)
-    mark_as_read = extract_config_value(config, "mark_as_read", default=True, converter=to_bool)
-    if isinstance(mark_as_read, str):
-        mark_as_read = mark_as_read.lower() in ("true", "1", "yes")
-    else:
-        mark_as_read = bool(mark_as_read)
-
-    return ImapBackendPlugin(
+    return create_backend_plugin_instance(
+        ImapBackendPlugin,
+        expected_type_id="imap",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        email_address=email_address,
-        email_password=email_password,
-        imap_server=imap_server,
-        imap_port=imap_port,
-        target_directory=target_directory,
-        check_interval=check_interval,
-        mark_as_read=mark_as_read,
-        enabled=enabled,
+        config=config,
+        fields=BACKEND_FIELDS,
     )
 
 
@@ -690,38 +699,6 @@ async def handle_plugin_config_update(
     """Handle IMAP plugin configuration update and instance management."""
     if type_id != "imap":
         return None
-
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        email_address = extract_config_value(c, "email_address", default="", converter=to_str)
-        email_password = extract_config_value(c, "email_password", default="", converter=to_str)
-        imap_server = extract_config_value(
-            c, "imap_server", default="imap.gmail.com", converter=to_str
-        )
-        imap_port = extract_config_value(c, "imap_port", default=993, converter=to_int)
-        check_interval = extract_config_value(c, "check_interval", default=300, converter=to_int)
-        target_directory = extract_config_value(c, "target_directory", default="", converter=to_str)
-
-        # Handle mark_as_read (may come as string "true"/"false")
-        mark_as_read = extract_config_value(c, "mark_as_read", default=True, converter=to_bool)
-        if isinstance(mark_as_read, str):
-            mark_as_read = mark_as_read.lower() in ("true", "1", "yes")
-        else:
-            mark_as_read = bool(mark_as_read)
-
-        return {
-            "email_address": email_address.strip() if email_address else "",
-            "email_password": email_password.strip() if email_password else "",
-            "imap_server": imap_server.strip() if imap_server else "imap.gmail.com",
-            "imap_port": imap_port,
-            "check_interval": check_interval,
-            "target_directory": target_directory.strip() if target_directory else "",
-            "mark_as_read": mark_as_read,
-        }
 
     def validate_config(c: dict[str, Any]) -> bool:
         """Validate config before creating/updating instance."""
@@ -774,12 +751,12 @@ async def handle_plugin_config_update(
 
         return instance_config
 
-    manager_config = InstanceManagerConfig(
+    manager_config = build_backend_manager_config(
         type_id="imap",
+        fields=BACKEND_FIELDS,
         single_instance=False,  # Multi-instance plugin
         validate_config=validate_config,
         generate_instance_id=generate_instance_id,
-        normalize_config=normalize_config,
         prepare_instance_config=prepare_instance_config,
         default_instance_name="IMAP Email",
     )
