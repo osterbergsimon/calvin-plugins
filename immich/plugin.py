@@ -9,6 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.sdk.image import fetch_image_data
 from app.plugins.utils.config import extract_config_value, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
@@ -127,14 +128,12 @@ class ImmichImagePlugin(ImagePlugin):
         # Strip our "immich-" prefix to get the real Immich asset ID
         asset_id = image_id.removeprefix("immich-")
         url = self._api(f"assets/{asset_id}/original")
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            try:
-                response = await client.get(url, headers=self._headers())
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                logger.warning(f"[Immich] Error fetching image data: {e}")
-                return None
+        return await fetch_image_data(
+            url,
+            plugin_name="Immich",
+            headers=self._headers(),
+            follow_redirects=True,
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         if not self.base_url or not self.api_key:

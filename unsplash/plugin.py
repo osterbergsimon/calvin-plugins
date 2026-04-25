@@ -9,6 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.sdk.image import fetch_image_data
 from app.plugins.utils.config import extract_config_value, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
@@ -159,15 +160,10 @@ class UnsplashImagePlugin(ImagePlugin):
         if not image_url:
             return None
 
-        # Fetch the image
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(image_url)
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                logger.warning(f"[Unsplash] Error fetching image data: {e}")
-                return None
+        return await fetch_image_data(
+            image_url,
+            plugin_name="Unsplash",
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         """

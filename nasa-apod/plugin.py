@@ -9,6 +9,7 @@ from loguru import logger
 from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
+from app.plugins.sdk.image import fetch_image_data
 from app.plugins.utils.config import extract_config_value, to_int, to_str
 from app.plugins.utils.instance_manager import (
     InstanceManagerConfig,
@@ -99,14 +100,11 @@ class NasaApodImagePlugin(ImagePlugin):
         url = image.get("url")
         if not url:
             return None
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            try:
-                response = await client.get(url)
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                logger.warning(f"[NASA APOD] Error fetching image data: {e}")
-                return None
+        return await fetch_image_data(
+            url,
+            plugin_name="NASA APOD",
+            follow_redirects=True,
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         if self._last_scan:
