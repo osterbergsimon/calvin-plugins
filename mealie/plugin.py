@@ -6,13 +6,40 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
+)
 from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+
+
+CREATE_FIELDS = (
+    ServiceConfigField(
+        "mealie_url",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.rstrip("/") if value else "",
+    ),
+    ServiceConfigField(
+        "api_token",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.strip() if value else "",
+    ),
+    ServiceConfigField(
+        "group_id",
+        default="",
+        converter=to_str,
+        transform=lambda value: value.strip() if value else None,
+    ),
+    ServiceConfigField("days_ahead", default=7, converter=to_int),
+    ServiceConfigField("display_order", default=0, converter=to_int),
+    ServiceConfigField("fullscreen", default=False, converter=to_bool),
 )
 
 
@@ -22,15 +49,14 @@ class MealieServicePlugin(ServicePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "mealie",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Mealie Meal Plan",
-            "description": "Display weekly meal plan from Mealie recipe manager",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,  # Multi-instance plugin
-            "instance_label": "Server",
-            "common_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="mealie",
+            name="Mealie Meal Plan",
+            description="Display weekly meal plan from Mealie recipe manager",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            instance_label="Server",
+            common_config_schema={
                 "display_order": {
                     "type": "integer",
                     "description": "Display order for service instances",
@@ -40,7 +66,7 @@ class MealieServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "instance_config_schema": {
+            instance_config_schema={
                 "mealie_url": {
                     "type": "string",
                     "description": "Mealie instance URL (e.g., http://mealie.local:9000)",
@@ -117,7 +143,7 @@ class MealieServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "ui_actions": [
+            ui_actions=[
                 {
                     "id": "save",
                     "type": "save",
@@ -131,7 +157,7 @@ class MealieServicePlugin(ServicePlugin):
                     "style": "secondary",
                 },
             ],
-            "display_schema": {
+            display_schema={
                 "type": "api",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
@@ -185,8 +211,7 @@ class MealieServicePlugin(ServicePlugin):
                 },
                 "render_template": "meal_plan",  # Legacy: kept for backward compatibility
             },
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -861,35 +886,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> MealieServicePlugin | None:
     """Create a MealieServicePlugin instance."""
-    if type_id != "mealie":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-
-    # Extract config values using utility functions
-    mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
-    mealie_url = mealie_url.rstrip("/") if mealie_url else ""
-
-    api_token = extract_config_value(config, "api_token", default="", converter=to_str)
-    api_token = api_token.strip() if api_token else ""
-
-    group_id = extract_config_value(config, "group_id", default="", converter=to_str)
-    group_id = group_id.strip() if group_id else None
-
-    days_ahead = extract_config_value(config, "days_ahead", default=7, converter=to_int)
-    display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-    fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
-
-    return MealieServicePlugin(
+    return create_service_plugin_instance(
+        MealieServicePlugin,
+        expected_type_id="mealie",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        mealie_url=mealie_url,
-        api_token=api_token,
-        group_id=group_id,
-        days_ahead=days_ahead,
-        enabled=enabled,
-        display_order=display_order,
-        fullscreen=fullscreen,
+        config=config,
+        fields=CREATE_FIELDS,
     )
 
 
@@ -964,11 +968,12 @@ async def handle_plugin_config_update(
 
         return True
 
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="mealie",
-        single_instance=False,  # Multi-instance plugin
+        fields=CREATE_FIELDS,
+        single_instance=False,
         validate_config=validate_config,
-        normalize_config=normalize_config,
+        extra_normalize=normalize_config,
         default_instance_name="Mealie Meal Plan",
     )
 

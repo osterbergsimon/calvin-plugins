@@ -9,14 +9,16 @@ import asyncio
 import time
 from typing import Any
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ServicePlugin
-from app.plugins.utils.config import extract_config_value, to_int, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.service import (
+    ServiceConfigField,
+    build_service_manager_config,
+    build_service_plugin_metadata,
+    create_service_plugin_instance,
 )
+from app.plugins.utils.config import extract_config_value, to_int, to_str
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 try:
     import pychromecast
@@ -26,21 +28,25 @@ except ImportError:
     _PYCHROMECAST_AVAILABLE = False
 
 
+SERVICE_FIELDS = (
+    ServiceConfigField("device_name", default="", converter=to_str),
+    ServiceConfigField("discovery_timeout", default=5, converter=to_int),
+)
+
+
 class ChromecastServicePlugin(ServicePlugin):
     """Displays what is currently casting on a Chromecast device."""
 
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
-        return {
-            "type_id": "chromecast",
-            "plugin_type": PluginType.SERVICE,
-            "name": "Chromecast Now Playing",
-            "description": "Show what's casting on any Chromecast — YouTube Music, Spotify, Netflix and more",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,
-            "instance_label": "Device",
-            "common_config_schema": {},
-            "instance_config_schema": {
+        return build_service_plugin_metadata(
+            type_id="chromecast",
+            name="Chromecast Now Playing",
+            description="Show what's casting on any Chromecast — YouTube Music, Spotify, Netflix and more",
+            plugin_class=cls,
+            supports_multiple_instances=True,
+            instance_label="Device",
+            instance_config_schema={
                 "device_name": {
                     "type": "string",
                     "description": "Chromecast device",
@@ -62,11 +68,10 @@ class ChromecastServicePlugin(ServicePlugin):
                     },
                 },
             },
-            "display_schema": {
+            display_schema={
                 "component": "chromecast/NowPlaying.vue",
             },
-            "plugin_class": cls,
-        }
+        )
 
     def __init__(
         self,
@@ -216,16 +221,14 @@ def create_plugin_instance(
     name: str,
     config: dict[str, Any],
 ) -> ChromecastServicePlugin | None:
-    if type_id != "chromecast":
-        return None
-    return ChromecastServicePlugin(
+    return create_service_plugin_instance(
+        ChromecastServicePlugin,
+        expected_type_id="chromecast",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        device_name=extract_config_value(config, "device_name", default="", converter=to_str),
-        discovery_timeout=extract_config_value(
-            config, "discovery_timeout", default=5, converter=to_int
-        ),
-        enabled=config.get("enabled", False),
+        config=config,
+        fields=SERVICE_FIELDS,
     )
 
 
@@ -240,18 +243,10 @@ async def handle_plugin_config_update(
     if type_id != "chromecast":
         return None
 
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "device_name": extract_config_value(c, "device_name", default="", converter=to_str),
-            "discovery_timeout": extract_config_value(
-                c, "discovery_timeout", default=5, converter=to_int
-            ),
-        }
-
-    manager_config = InstanceManagerConfig(
+    manager_config = build_service_manager_config(
         type_id="chromecast",
+        fields=SERVICE_FIELDS,
         single_instance=False,
-        normalize_config=normalize_config,
         default_instance_name="Chromecast",
     )
 
