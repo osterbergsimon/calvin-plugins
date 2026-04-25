@@ -61,6 +61,7 @@ def to_type_id(plugin_id: str) -> str:
 def generate_plugin_json(plugin_id, name, plugin_type, description, author):
     manifest = {
         "format_version": "1.0.0",
+        "protocol_version": 1,
         "id": to_type_id(plugin_id),
         "name": name,
         "version": "1.0.0",

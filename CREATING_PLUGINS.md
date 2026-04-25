@@ -71,6 +71,7 @@ Create `plugin.json` with required fields:
 ```json
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "my_plugin",
   "name": "My Plugin",
   "version": "1.0.0",
@@ -89,6 +90,7 @@ Create `plugin.json` with required fields:
 
 **Optional Fields:**
 - `format_version`: Plugin manifest format version (defaults to `1.0.0`)
+- `protocol_version`: Calvin plugin protocol version (defaults to `1`)
 - `description`: Plugin description
 - `author`: Plugin author
 - `license`: License type
@@ -570,7 +572,7 @@ Handle background work, events, or non-visual integrations.
 8. **Document dependencies** in `plugin.json`
 9. **Test plugins** before distribution
 10. **Follow naming conventions**: lowercase with underscores for IDs
-11. **Include format_version** in `plugin.json` for future compatibility
+11. **Include format_version and protocol_version** in `plugin.json` for future compatibility
 12. **Specify dependencies** explicitly to avoid runtime errors
 13. **Exclude unnecessary files** to reduce plugin size
 14. **Document permissions** required by your plugin
@@ -588,16 +590,17 @@ The plugin package format is versioned to allow for future changes while maintai
 
 **Current Format Version: `1.0.0`**
 
-Always specify `format_version` in your `plugin.json`:
+Always specify `format_version` and `protocol_version` in your `plugin.json`:
 
 ```json
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   ...
 }
 ```
 
-If not specified, it defaults to `1.0.0`. Future format versions will be documented in the [format specification](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#format-versioning).
+If not specified, `format_version` defaults to `1.0.0` and `protocol_version` defaults to `1`. Future versions will be documented in the [format specification](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#format-versioning).
 
 ## Getting Help
 

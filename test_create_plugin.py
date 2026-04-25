@@ -11,6 +11,7 @@ _spec = importlib.util.spec_from_file_location(
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 create_plugin = _mod.create_plugin
+generate_plugin_json = _mod.generate_plugin_json
 generate_plugin_py = _mod.generate_plugin_py
 
 
@@ -57,6 +58,19 @@ def test_backend_scaffold_uses_backend_sdk():
     assert "build_backend_manager_config(" in plugin_py
 
 
+def test_generated_manifest_includes_protocol_version():
+    manifest_json = generate_plugin_json("demo-service", "Demo Service", "service", "Demo", "")
+
+    assert '"format_version": "1.0.0"' in manifest_json
+    assert '"protocol_version": 1' in manifest_json
+
+
+def test_generated_manifest_includes_protocol_version_for_all_types():
+    for plugin_type in ("service", "image", "calendar", "backend"):
+        manifest_json = generate_plugin_json("demo-plugin", "Demo Plugin", plugin_type, "Demo", "")
+        assert '"protocol_version": 1' in manifest_json
+
+
 def test_create_plugin_writes_sdk_first_scaffold(tmp_path, monkeypatch):
     monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
@@ -81,5 +95,6 @@ def test_create_plugin_writes_sdk_first_scaffold(tmp_path, monkeypatch):
     assert plugin_dir.exists()
     assert (plugin_dir / "plugin.json").exists()
     assert (plugin_dir / "test_demo_gallery.py").exists()
+    assert '"protocol_version": 1' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
     assert "from app.plugins.sdk.image import (" in plugin_py
     assert 'instance_id="demo_gallery-instance"' in plugin_py
