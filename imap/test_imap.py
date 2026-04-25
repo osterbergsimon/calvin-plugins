@@ -306,7 +306,7 @@ class TestImapBackendPlugin:
     async def test_fetch_type_data_not_found(self):
         from app.models.db_models import PluginDB
 
-        with patch.object(PluginDB.objects, "filter") as filter_mock:
+        with patch.object(type(PluginDB.objects), "filter") as filter_mock:
             filter_mock.return_value.all = AsyncMock(return_value=[])
             result = await ImapBackendPlugin.fetch_type_data()
 
