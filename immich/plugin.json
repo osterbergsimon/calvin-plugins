@@ -1,5 +1,6 @@
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "immich",
   "name": "Immich",
   "version": "1.0.0",
@@ -9,7 +10,12 @@
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
   "repository": "https://github.com/calvin-dashboard/calvin-plugins",
-  "keywords": ["image", "photos", "immich", "self-hosted"],
+  "keywords": [
+    "image",
+    "photos",
+    "immich",
+    "self-hosted"
+  ],
   "dependencies": {
     "python": ">=3.10",
     "calvin": ">=1.0.0"

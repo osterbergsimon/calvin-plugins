@@ -1,5 +1,6 @@
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "test_plugin",
   "name": "Test Plugin",
   "version": "1.0.0",
@@ -9,7 +10,11 @@
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
   "repository": "https://github.com/calvin-dashboard/calvin-plugins",
-  "keywords": ["test", "example", "service"],
+  "keywords": [
+    "test",
+    "example",
+    "service"
+  ],
   "dependencies": {
     "python": ">=3.10",
     "calvin": ">=1.0.0"
@@ -30,4 +35,3 @@
     "config_required": false
   }
 }
-

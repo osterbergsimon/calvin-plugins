@@ -1,5 +1,6 @@
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "system_monitor",
   "name": "System Monitor",
   "version": "1.0.0",
@@ -9,8 +10,17 @@
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
   "repository": "https://github.com/calvin-dashboard/calvin-plugins",
-  "keywords": ["service", "system", "monitor", "cpu", "memory", "raspberry-pi"],
-  "python_dependencies": ["psutil>=5.9"],
+  "keywords": [
+    "service",
+    "system",
+    "monitor",
+    "cpu",
+    "memory",
+    "raspberry-pi"
+  ],
+  "python_dependencies": [
+    "psutil>=5.9"
+  ],
   "dependencies": {
     "python": ">=3.10",
     "calvin": ">=1.0.0"

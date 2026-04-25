@@ -1,5 +1,6 @@
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "image-processor",
   "name": "Image Processor",
   "version": "1.0.0",
@@ -9,7 +10,13 @@
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
   "repository": "https://github.com/calvin-dashboard/calvin-plugins",
-  "keywords": ["image", "processor", "events", "backend", "example"],
+  "keywords": [
+    "image",
+    "processor",
+    "events",
+    "backend",
+    "example"
+  ],
   "dependencies": {
     "python": ">=3.10",
     "calvin": ">=1.0.0"

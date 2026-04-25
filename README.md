@@ -55,6 +55,7 @@ Minimal required fields:
 ```json
 {
   "format_version": "1.0.0",
+  "protocol_version": 1,
   "id": "my_plugin",
   "name": "My Plugin",
   "version": "1.0.0",
@@ -62,7 +63,7 @@ Minimal required fields:
 }
 ```
 
-**Note**: While `format_version` is optional (defaults to `1.0.0`), it's recommended to include it explicitly for future compatibility.
+**Note**: While `format_version` and `protocol_version` are optional (`1.0.0` and `1` respectively), it's recommended to include them explicitly for future compatibility.
 
 See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugin-manifest-schema-pluginjson) for all available fields including:
 - Dependencies (Python packages, system requirements)
@@ -125,7 +126,7 @@ Quick checklist:
 
 **Current Format Version: `1.0.0`**
 
-All plugins should specify `format_version: "1.0.0"` in their `plugin.json` manifest. This ensures compatibility as the format evolves.
+All plugins should specify `format_version: "1.0.0"` and `protocol_version: 1` in their `plugin.json` manifest. This makes both package-format and runtime-protocol compatibility explicit.
 
 See [Format Versioning](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#format-versioning) for details.
 
