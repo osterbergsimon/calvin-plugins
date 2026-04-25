@@ -7,15 +7,23 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
 from app.plugins.hooks import hookimpl
 from app.plugins.protocols import ImagePlugin
-from app.plugins.utils.config import extract_config_value, to_int
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
+from app.plugins.sdk.image import (
+    ImageConfigField,
+    build_image_manager_config,
+    build_image_plugin_metadata,
+    create_image_plugin_instance,
+    fetch_image_data,
 )
+from app.plugins.utils.config import extract_config_value, to_int
+from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
+
+
+IMAGE_FIELDS = (
+    ImageConfigField("count", default=30, converter=to_int),
+)
 
 
 class PicsumImagePlugin(ImagePlugin):
@@ -24,14 +32,13 @@ class PicsumImagePlugin(ImagePlugin):
     @classmethod
     def get_plugin_metadata(cls) -> dict[str, Any]:
         """Get plugin metadata for registration."""
-        return {
-            "type_id": "picsum",
-            "plugin_type": PluginType.IMAGE,
-            "name": "Picsum Photos",
-            "description": "Random high-quality images from Picsum Photos (no API key required)",
-            "version": "1.0.0",
-            "supports_multiple_instances": False,  # Single-instance plugin
-            "common_config_schema": {
+        return build_image_plugin_metadata(
+            type_id="picsum",
+            name="Picsum Photos",
+            description="Random high-quality images from Picsum Photos (no API key required)",
+            plugin_class=cls,
+            supports_multiple_instances=False,
+            common_config_schema={
                 "count": {
                     "type": "string",
                     "description": "Number of photos to fetch (1-100)",
@@ -44,9 +51,8 @@ class PicsumImagePlugin(ImagePlugin):
                     },
                 },
             },
-            "instance_config_schema": {},  # No instance-specific settings (single-instance)
-            "plugin_class": cls,
-        }
+            instance_config_schema={},
+        )
 
     def __init__(
         self,
@@ -127,15 +133,10 @@ class PicsumImagePlugin(ImagePlugin):
         if not image_url:
             return None
 
-        # Fetch the image
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(image_url)
-                response.raise_for_status()
-                return response.content
-            except httpx.HTTPError as e:
-                logger.warning(f"[Picsum] Error fetching image data: {e}")
-                return None
+        return await fetch_image_data(
+            image_url,
+            plugin_name="Picsum",
+        )
 
     async def scan_images(self) -> list[dict[str, Any]]:
         """
@@ -292,17 +293,14 @@ def create_plugin_instance(
     config: dict[str, Any],
 ) -> PicsumImagePlugin | None:
     """Create a PicsumImagePlugin instance."""
-    if type_id != "picsum":
-        return None
-
-    enabled = config.get("enabled", False)  # Default to disabled
-    count = extract_config_value(config, "count", default=30, converter=to_int)
-
-    return PicsumImagePlugin(
+    return create_image_plugin_instance(
+        PicsumImagePlugin,
+        expected_type_id="picsum",
         plugin_id=plugin_id,
+        type_id=type_id,
         name=name,
-        count=count,
-        enabled=enabled,
+        config=config,
+        fields=IMAGE_FIELDS,
     )
 
 
@@ -318,17 +316,11 @@ async def handle_plugin_config_update(
     if type_id != "picsum":
         return None
 
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        """Normalize config values."""
-        return {
-            "count": extract_config_value(c, "count", default=30, converter=to_int),
-        }
-
-    manager_config = InstanceManagerConfig(
+    manager_config = build_image_manager_config(
         type_id="picsum",
+        fields=IMAGE_FIELDS,
         single_instance=True,
         instance_id="picsum-instance",
-        normalize_config=normalize_config,
         default_instance_name="Picsum Photos",
     )
 
