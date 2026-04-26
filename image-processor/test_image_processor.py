@@ -64,7 +64,7 @@ class TestImageProcessorPlugin:
         assert metadata["supports_multiple_instances"] is True
         assert "common_config_schema" in metadata
         assert "instance_config_schema" in metadata
-        assert "enabled" in metadata["instance_config_schema"]
+        assert "enabled" not in metadata["instance_config_schema"]
         assert "max_width" in metadata["instance_config_schema"]
         assert "max_height" in metadata["instance_config_schema"]
         assert "thumbnail_size" in metadata["instance_config_schema"]

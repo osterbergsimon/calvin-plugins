@@ -36,6 +36,9 @@ class TestChromecastServicePlugin:
         assert metadata["type_id"] == "chromecast"
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["supports_multiple_instances"] is True
+        assert metadata["display_schema"]["kind"] == "web-component"
+        assert metadata["display_schema"]["element"] == "calvin-chromecast-now-playing"
+        assert metadata["display_schema"]["module"] == "dist.js"
 
     @pytest.mark.asyncio
     async def test_scan_type_options_ignores_other_fields(self):

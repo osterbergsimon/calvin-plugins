@@ -23,8 +23,7 @@
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json",
-      "frontend/WeatherStatusbar.vue"
+      "plugin.json"
     ],
     "exclude": [
       "*.md",

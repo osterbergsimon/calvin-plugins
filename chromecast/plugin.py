@@ -69,7 +69,10 @@ class ChromecastServicePlugin(ServicePlugin):
                 },
             },
             display_schema={
-                "component": "chromecast/NowPlaying.vue",
+                "kind": "web-component",
+                "element": "calvin-chromecast-now-playing",
+                "module": "dist.js",
+                "poll_interval_ms": 10 * 1000,
             },
         )
 
@@ -112,7 +115,7 @@ class ChromecastServicePlugin(ServicePlugin):
         end_date: str | None = None,
     ) -> dict[str, Any]:
         if not _PYCHROMECAST_AVAILABLE:
-            return {"error": "pychromecast is not installed"}
+            return {"state": "error", "error": "pychromecast is not installed"}
 
         return await asyncio.get_event_loop().run_in_executor(None, self._get_cast_status)
 

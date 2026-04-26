@@ -1,6 +1,6 @@
 """Mealie meal planning service plugin."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -150,9 +150,24 @@ class MealieServicePlugin(ServicePlugin):
             ],
             display_schema={
                 "type": "api",
+                "kind": "card-grid",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
-                "component": "mealie/MealPlanViewer.vue",  # Plugin-provided frontend component
+                "poll_interval_ms": 30 * 60 * 1000,
+                "data_path": "$.display.days",
+                "layout": {"columns": "auto-fit-220"},
+                "empty_text": "No meals planned",
+                "card": {
+                    "title_path": "$.date",
+                    "title_format": "weekday-short",
+                    "items_path": "$.meals",
+                    "item": {
+                        "label_path": "$.type",
+                        "label_format": "capitalize",
+                        "value_path": "$.name",
+                        "click_url_path": "$.url",
+                    },
+                },
                 "data_schema": {
                     "items": {
                         "type": "array",
@@ -200,7 +215,6 @@ class MealieServicePlugin(ServicePlugin):
                         "description": "End date of the meal plan",
                     },
                 },
-                "render_template": "meal_plan",  # Legacy: kept for backward compatibility
             },
         )
 
@@ -342,7 +356,107 @@ class MealieServicePlugin(ServicePlugin):
             elif isinstance(data, list):
                 data = {"items": data, "_metadata": {"mealie_url": self.mealie_url.rstrip("/")}}
 
+        if isinstance(data, dict):
+            data["display"] = self._build_display_data(data, start_date, end_date)
+
         return data
+
+    def _build_display_data(
+        self,
+        data: dict[str, Any],
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Build host-renderable meal plan display data."""
+        raw_items = self._extract_meal_items(data)
+        start = self._parse_date(start_date) or self._first_item_date(raw_items) or date.today()
+        end = (
+            self._parse_date(end_date)
+            or self._last_item_date(raw_items)
+            or start + timedelta(days=self.days_ahead)
+        )
+
+        meals_by_date: dict[str, list[dict[str, Any]]] = {}
+        for item in raw_items:
+            meal_date = self._parse_date(item.get("date"))
+            if meal_date is None or meal_date < date.today():
+                continue
+            key = meal_date.isoformat()
+            meals_by_date.setdefault(key, []).append(self._shape_meal(item))
+
+        days = []
+        current = max(start, date.today())
+        while current <= end:
+            key = current.isoformat()
+            days.append(
+                {
+                    "date": key,
+                    "meals": meals_by_date.get(key, []),
+                }
+            )
+            current += timedelta(days=1)
+
+        return {
+            "days": days,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+        }
+
+    def _extract_meal_items(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        items = data.get("items", data if isinstance(data, list) else [])
+        if not isinstance(items, list) and isinstance(data.get("date"), str):
+            items = [data]
+        if not isinstance(items, list):
+            return []
+
+        flat_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            meals = item.get("meals")
+            if isinstance(meals, list):
+                for meal in meals:
+                    if isinstance(meal, dict):
+                        flat_items.append({**meal, "date": meal.get("date") or item.get("date")})
+                continue
+            flat_items.append(item)
+        return flat_items
+
+    def _shape_meal(self, item: dict[str, Any]) -> dict[str, Any]:
+        recipe = item.get("recipe") if isinstance(item.get("recipe"), dict) else {}
+        meal_type = item.get("entryType") or item.get("type") or "meal"
+        name = recipe.get("name") or item.get("recipeName") or item.get("title") or "No recipe"
+        return {
+            "type": str(meal_type),
+            "name": str(name),
+            "url": self._recipe_url(item, recipe),
+        }
+
+    def _recipe_url(self, item: dict[str, Any], recipe: dict[str, Any]) -> str | None:
+        if not self.mealie_url:
+            return None
+        slug = recipe.get("slug") or recipe.get("id") or item.get("recipeId")
+        if not slug:
+            return None
+        return f"{self.mealie_url.rstrip('/')}/g/home/r/{slug}"
+
+    def _parse_date(self, value: Any) -> date | None:
+        if not value:
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value).split("T")[0]).date()
+        except (TypeError, ValueError):
+            return None
+
+    def _first_item_date(self, items: list[dict[str, Any]]) -> date | None:
+        dates = [parsed for item in items if (parsed := self._parse_date(item.get("date")))]
+        return min(dates) if dates else None
+
+    def _last_item_date(self, items: list[dict[str, Any]]) -> date | None:
+        dates = [parsed for item in items if (parsed := self._parse_date(item.get("date")))]
+        return max(dates) if dates else None
 
     async def _fetch_meal_plan(
         self, start_date: str | None = None, end_date: str | None = None
