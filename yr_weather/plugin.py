@@ -85,16 +85,7 @@ class YrWeatherServicePlugin(ServicePlugin):
             plugin_class=cls,
             supports_multiple_instances=True,
             instance_label="Location",
-            common_config_schema={
-                "display_order": {
-                    "type": "integer",
-                    "description": "Display order for service instances",
-                    "default": 0,
-                    "ui": {
-                        "hidden": True,
-                    },
-                },
-            },
+            common_config_schema={},
             instance_config_schema={
                 "location": {
                     "type": "string",
