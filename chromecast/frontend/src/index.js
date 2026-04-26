@@ -4,16 +4,20 @@ class CalvinChromecastNowPlaying extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = {};
   }
+
   set data(value) {
     this._data = value || {};
     this.render();
   }
+
   get data() {
     return this._data;
   }
+
   connectedCallback() {
     this.render();
   }
+
   get appIcon() {
     const app = String(this._data.app_name || "").toLowerCase();
     if (app.includes("youtube")) return "YT";
@@ -22,21 +26,30 @@ class CalvinChromecastNowPlaying extends HTMLElement {
     if (app.includes("plex")) return "P";
     return "TV";
   }
+
   get progressPct() {
     const current = Number(this._data.current_time || 0);
     const duration = Number(this._data.duration || 0);
     if (!duration || !current) return 0;
-    return Math.min(100, current / duration * 100);
+    return Math.min(100, (current / duration) * 100);
   }
+
   formatTime(value) {
     const secs = Number(value || 0);
     const mins = Math.floor(secs / 60);
     const rest = Math.floor(secs % 60);
     return `${mins}:${String(rest).padStart(2, "0")}`;
   }
+
   escape(value) {
-    return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
+
   renderIdle(message, icon = "TV") {
     return `
       <div class="np-idle">
@@ -45,18 +58,24 @@ class CalvinChromecastNowPlaying extends HTMLElement {
       </div>
     `;
   }
+
   renderActive() {
     const data = this._data;
-    const art = data.album_art_url ? `<img class="np-art" src="${this.escape(data.album_art_url)}" alt="">` : `<div class="np-art-placeholder">${this.escape(this.appIcon)}</div>`;
+    const art = data.album_art_url
+      ? `<img class="np-art" src="${this.escape(data.album_art_url)}" alt="">`
+      : `<div class="np-art-placeholder">${this.escape(this.appIcon)}</div>`;
     const artist = data.artist ? `<div class="np-artist">${this.escape(data.artist)}</div>` : "";
-    const progress = data.duration ? `
+    const progress = data.duration
+      ? `
         <div class="np-progress">
           <div class="np-bar-track">
             <div class="np-bar-fill" style="width: ${this.progressPct}%"></div>
           </div>
           <span class="np-time">${this.formatTime(data.current_time)} / ${this.formatTime(data.duration)}</span>
         </div>
-      ` : "";
+      `
+      : "";
+
     return `
       <div class="np-active">
         ${art}
@@ -69,9 +88,11 @@ class CalvinChromecastNowPlaying extends HTMLElement {
       </div>
     `;
   }
+
   renderBody() {
     const state = this._data.state || "idle";
     const deviceName = this._data.device_name || "Chromecast";
+
     if (state === "error") {
       return this.renderIdle(this._data.error || "Unable to read cast status");
     }
@@ -79,7 +100,9 @@ class CalvinChromecastNowPlaying extends HTMLElement {
       return this.renderIdle("No Chromecasts found");
     }
     if (state === "device_not_found") {
-      const available = Array.isArray(this._data.available_devices) ? this._data.available_devices.join(", ") : "No matching device discovered";
+      const available = Array.isArray(this._data.available_devices)
+        ? this._data.available_devices.join(", ")
+        : "No matching device discovered";
       return this.renderIdle(`${deviceName} not found. ${available}`);
     }
     if (state === "idle") {
@@ -87,6 +110,7 @@ class CalvinChromecastNowPlaying extends HTMLElement {
     }
     return this.renderActive();
   }
+
   render() {
     if (!this.shadowRoot) return;
     this.shadowRoot.innerHTML = `
@@ -219,6 +243,7 @@ class CalvinChromecastNowPlaying extends HTMLElement {
     `;
   }
 }
+
 if (!customElements.get("calvin-chromecast-now-playing")) {
   customElements.define("calvin-chromecast-now-playing", CalvinChromecastNowPlaying);
 }

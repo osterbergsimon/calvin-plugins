@@ -98,14 +98,6 @@
       "type": "image"
     },
     {
-      "id": "weather",
-      "name": "Weather",
-      "path": "weather",
-      "description": "Display current weather conditions and forecast from OpenWeatherMap",
-      "version": "1.0.0",
-      "type": "service"
-    },
-    {
       "id": "yr_weather",
       "name": "Yr.no Weather",
       "path": "yr_weather",

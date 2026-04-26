@@ -167,8 +167,30 @@ class YrWeatherServicePlugin(ServicePlugin):
             ui_actions=[],
             display_schema={
                 "type": "api",
+                "kind": "weather-forecast",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
+                "poll_interval_ms": 600000,
+                "title_path": "$.location",
+                "current_path": "$.current",
+                "current": {
+                    "icon_path": "$.display.icon",
+                    "temperature_path": "$.temperature",
+                    "feels_like_path": "$.feels_like",
+                    "humidity_path": "$.humidity",
+                    "pressure_path": "$.pressure",
+                    "wind_speed_path": "$.wind_speed",
+                    "description_path": "$.description",
+                },
+                "forecast_path": "$.forecast",
+                "forecast": {
+                    "date_path": "$.date",
+                    "icon_path": "$.display.icon",
+                    "temp_min_path": "$.temp_min",
+                    "temp_max_path": "$.temp_max",
+                    "description_path": "$.description",
+                },
+                "units": {"temperature": "°C", "wind": "m/s"},
                 "data_schema": {
                     "current": {
                         "type": "object",
@@ -199,7 +221,6 @@ class YrWeatherServicePlugin(ServicePlugin):
                     "location": {"type": "string"},
                     "units": {"type": "string"},
                 },
-                "render_template": "weather",  # Reuse the same WeatherWidget component!
             },
             statusbar_schema={
                 "kind": "status-tile",
@@ -380,6 +401,41 @@ class YrWeatherServicePlugin(ServicePlugin):
 
         return symbol_mapping.get(symbol_code, "01d")  # Default to clear sky day
 
+    def _map_symbol_code_to_mdi_icon(self, symbol_code: str) -> str:
+        """Map Yr.no symbol codes to host-owned MDI weather icon IDs."""
+        if not symbol_code:
+            return "mdi:weather-cloudy"
+
+        if symbol_code in {"clearsky_night", "fair_night"}:
+            return "mdi:weather-night"
+        if symbol_code == "partlycloudy_night":
+            return "mdi:weather-partly-cloudy"
+
+        base_code = (
+            symbol_code.replace("_day", "").replace("_night", "").replace("_polartwilight", "")
+        )
+        symbol_mapping = {
+            "clearsky": "mdi:weather-sunny",
+            "fair": "mdi:weather-partly-cloudy",
+            "partlycloudy": "mdi:weather-partly-cloudy",
+            "cloudy": "mdi:weather-cloudy",
+            "rainshowers": "mdi:weather-rainy",
+            "rain": "mdi:weather-rainy",
+            "heavyrain": "mdi:weather-pouring",
+            "heavyrainshowers": "mdi:weather-pouring",
+            "sleet": "mdi:weather-snowy",
+            "sleetshowers": "mdi:weather-snowy",
+            "snow": "mdi:weather-snowy",
+            "snowshowers": "mdi:weather-snowy",
+            "heavysnow": "mdi:weather-snowy",
+            "heavysnowshowers": "mdi:weather-snowy",
+            "fog": "mdi:weather-fog",
+            "thunder": "mdi:weather-lightning",
+            "rainshowersandthunder": "mdi:weather-lightning",
+            "heavyrainshowersandthunder": "mdi:weather-lightning",
+        }
+        return symbol_mapping.get(base_code, "mdi:weather-cloudy")
+
     def _get_description_from_symbol(self, symbol_code: str) -> str:
         """Convert symbol code to human-readable description."""
         # Remove time of day suffixes
@@ -474,6 +530,7 @@ class YrWeatherServicePlugin(ServicePlugin):
             )
 
             owm_icon = self._map_symbol_code_to_icon(symbol_code)
+            mdi_icon = self._map_symbol_code_to_mdi_icon(symbol_code)
             air_temp = instant.get("air_temperature", 0)
             current = {
                 "temperature": air_temp,
@@ -488,6 +545,7 @@ class YrWeatherServicePlugin(ServicePlugin):
                 "wind_direction": instant.get("wind_from_direction", 0),
                 # Pre-shaped fields the schema-driven statusbar binds to.
                 "display": {
+                    "icon": mdi_icon,
                     "emoji": _icon_to_emoji(owm_icon),
                     "temperature_rounded": round(air_temp) if air_temp is not None else None,
                 },
@@ -560,6 +618,13 @@ class YrWeatherServicePlugin(ServicePlugin):
                                 "icon": self._map_symbol_code_to_icon(day_data["symbols"][0])
                                 if day_data["symbols"]
                                 else "01d",
+                                "display": {
+                                    "icon": self._map_symbol_code_to_mdi_icon(
+                                        day_data["symbols"][0]
+                                    )
+                                    if day_data["symbols"]
+                                    else "mdi:weather-cloudy",
+                                },
                             }
                         )
 

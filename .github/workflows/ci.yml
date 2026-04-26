@@ -7,6 +7,29 @@ on:
     branches: [main, develop]
 
 jobs:
+  frontend-artifacts:
+    name: Lint and Build Plugin Frontends
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout calvin-plugins
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend toolchain
+        run: npm ci
+
+      - name: Lint plugin frontend sources
+        run: npm run lint
+
+      - name: Validate built frontend artifacts
+        run: npm run check:plugin-artifacts
+
   test-plugins:
     name: Test Plugins
     runs-on: ubuntu-latest

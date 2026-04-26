@@ -29,11 +29,11 @@ try:
             YrWeatherServicePlugin = yr_weather_module.YrWeatherServicePlugin
             handle_plugin_config_update = yr_weather_module.handle_plugin_config_update
         else:
-            pytest.skip("Could not load yr_weather plugin module")
+            pytest.skip("Could not load yr_weather plugin module", allow_module_level=True)
     else:
-        pytest.skip("yr_weather plugin.py not found")
+        pytest.skip("yr_weather plugin.py not found", allow_module_level=True)
 except ImportError as e:
-    pytest.skip(f"Backend dependencies not available: {e}")
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture
@@ -66,6 +66,15 @@ class TestYrWeatherServicePlugin:
         assert "instance_config_schema" in metadata
         assert "latitude" in metadata["instance_config_schema"]
         assert "longitude" in metadata["instance_config_schema"]
+        assert metadata["display_schema"]["kind"] == "weather-forecast"
+        assert metadata["display_schema"]["current"]["icon_path"] == "$.display.icon"
+
+    def test_symbol_code_to_mdi_icon(self, yr_weather_plugin):
+        """Test Yr symbol to host weather icon mapping."""
+        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_day") == "mdi:weather-sunny"
+        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_night") == "mdi:weather-night"
+        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("heavyrain") == "mdi:weather-pouring"
+        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("fog") == "mdi:weather-fog"
 
     def test_init(self, yr_weather_plugin):
         """Test plugin initialization."""
