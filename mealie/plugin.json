@@ -24,8 +24,7 @@
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json",
-      "frontend/**"
+      "plugin.json"
     ],
     "exclude": [
       "*.md",

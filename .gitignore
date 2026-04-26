@@ -9,6 +9,7 @@ __pycache__/
 venv/
 env/
 ENV/
+node_modules/
 
 # IDE
 .vscode/

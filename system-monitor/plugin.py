@@ -73,13 +73,13 @@ class SystemMonitorServicePlugin(ServicePlugin):
                 "show_temperature": {
                     "type": "boolean",
                     "description": "Show CPU/GPU temperature",
-                    "default": "true",
+                    "default": True,
                     "ui": {"component": "checkbox"},
                 },
                 "show_network": {
                     "type": "boolean",
                     "description": "Show network throughput",
-                    "default": "true",
+                    "default": True,
                     "ui": {"component": "checkbox"},
                 },
                 "temp_unit": {
@@ -102,10 +102,29 @@ class SystemMonitorServicePlugin(ServicePlugin):
                 },
             },
             display_schema={
-                "component": "system_monitor/SystemMonitor.vue",
+                "kind": "metric-dashboard",
+                "data_path": "$.display.tiles",
+                "tile": {
+                    "icon_path": "$.icon",
+                    "label_path": "$.label",
+                    "value_path": "$.value",
+                    "value_format": "round-1",
+                    "unit_path": "$.unit",
+                    "status_path": "$.status",
+                },
+                "layout": {"columns": "auto-square"},
+                "poll_interval_ms": 5000,
             },
             statusbar_schema={
-                "component": "system_monitor/SystemStatusbar.vue",
+                "kind": "status-row",
+                "data_path": "$.display.row",
+                "item": {
+                    "label_path": "$.label",
+                    "value_path": "$.value",
+                    "unit_path": "$.unit",
+                    "status_path": "$.status",
+                },
+                "poll_interval_ms": 30000,
             },
         )
 
@@ -203,7 +222,60 @@ class SystemMonitorServicePlugin(ServicePlugin):
                 }
             self._net_bytes_prev = current
 
+        data["display"] = self._build_display(data)
         return data
+
+    @staticmethod
+    def _pct_status(percent: float | None) -> str | None:
+        if percent is None:
+            return None
+        if percent >= 95:
+            return "error"
+        if percent >= 80:
+            return "warn"
+        return "ok"
+
+    def _temp_status(self, temp: float | None) -> str | None:
+        if temp is None:
+            return None
+        celsius = (temp - 32) * 5 / 9 if self.temp_unit == "F" else temp
+        if celsius >= 75:
+            return "error"
+        if celsius >= 60:
+            return "warn"
+        return "ok"
+
+    def _build_display(self, data: dict[str, Any]) -> dict[str, Any]:
+        cpu = data.get("cpu_percent")
+        mem_pct = data.get("memory", {}).get("percent")
+        disk_pct = data.get("disk", {}).get("percent")
+        temp = data.get("temperature")
+        unit_label = f"°{data.get('temp_unit', self.temp_unit)}"
+
+        tiles = [
+            {"icon": "🖥️", "label": "CPU", "value": cpu, "unit": "%",
+             "status": self._pct_status(cpu)},
+            {"icon": "💾", "label": "Memory", "value": mem_pct, "unit": "%",
+             "status": self._pct_status(mem_pct)},
+            {"icon": "💽", "label": "Disk", "value": disk_pct, "unit": "%",
+             "status": self._pct_status(disk_pct)},
+        ]
+        if temp is not None:
+            tiles.append({
+                "icon": "🌡️", "label": "Temp", "value": temp, "unit": unit_label,
+                "status": self._temp_status(temp),
+            })
+
+        row = [
+            {"label": "CPU", "value": round(cpu) if cpu is not None else None, "unit": "%"},
+            {"label": "RAM", "value": round(mem_pct) if mem_pct is not None else None, "unit": "%"},
+        ]
+        if temp is not None:
+            row.append({
+                "value": temp, "unit": unit_label, "status": self._temp_status(temp),
+            })
+
+        return {"tiles": tiles, "row": row}
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
         return True

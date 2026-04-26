@@ -1,0 +1,16 @@
+{
+  "name": "calvin-plugins",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint \"*/frontend/src/**/*.js\" scripts/*.js",
+    "build:plugins": "bash scripts/build-plugin.sh",
+    "check:plugin-artifacts": "bash scripts/check-plugin-artifacts.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "vite": "^7.2.4"
+  }
+}

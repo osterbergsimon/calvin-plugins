@@ -28,7 +28,7 @@
     "include": [
       "plugin.py",
       "plugin.json",
-      "frontend/NowPlaying.vue"
+      "frontend/dist.js"
     ],
     "exclude": [
       "*.md",

@@ -118,6 +118,73 @@ class TestMealieServicePlugin:
         )
         assert plugin.mealie_url == "http://mealie.local:9000"
 
+    def test_build_display_data_groups_meals_by_day(self, mealie_plugin):
+        """Test schema-renderer display data shape."""
+        result = mealie_plugin._build_display_data(
+            {
+                "items": [
+                    {
+                        "date": "2099-01-01",
+                        "entryType": "breakfast",
+                        "recipe": {"name": "Toast", "slug": "toast"},
+                    },
+                    {
+                        "date": "2099-01-01",
+                        "entryType": "dinner",
+                        "title": "Pasta",
+                        "recipeId": "pasta-id",
+                    },
+                ]
+            },
+            start_date="2099-01-01",
+            end_date="2099-01-02",
+        )
+
+        assert result["days"][0]["date"] == "2099-01-01"
+        assert result["days"][0]["meals"] == [
+            {
+                "type": "breakfast",
+                "name": "Toast",
+                "url": "http://mealie.local:9000/g/home/r/toast",
+            },
+            {
+                "type": "dinner",
+                "name": "Pasta",
+                "url": "http://mealie.local:9000/g/home/r/pasta-id",
+            },
+        ]
+        assert result["days"][1] == {"date": "2099-01-02", "meals": []}
+
+    def test_build_display_data_flattens_grouped_meals(self, mealie_plugin):
+        """Test grouped Mealie responses are flattened for card-grid."""
+        result = mealie_plugin._build_display_data(
+            {
+                "items": [
+                    {
+                        "date": "2099-01-01",
+                        "meals": [
+                            {"type": "lunch", "recipe": {"name": "Soup", "slug": "soup"}},
+                        ],
+                    }
+                ]
+            },
+            start_date="2099-01-01",
+            end_date="2099-01-01",
+        )
+
+        assert result["days"] == [
+            {
+                "date": "2099-01-01",
+                "meals": [
+                    {
+                        "type": "lunch",
+                        "name": "Soup",
+                        "url": "http://mealie.local:9000/g/home/r/soup",
+                    }
+                ],
+            }
+        ]
+
     @pytest.mark.asyncio
     async def test_initialize_success(self, mealie_plugin):
         """Test plugin initialization with valid URL and token."""

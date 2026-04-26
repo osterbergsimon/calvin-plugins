@@ -274,15 +274,23 @@ The generated scaffold already wires the correct helper family for each plugin t
 
 ### Step 4: Add Frontend Components (Optional)
 
-If your plugin needs custom frontend components, create a `frontend/` directory:
+Prefer schema-driven host renderers when they fit. If your plugin needs a custom web component, keep the source in `frontend/src/index.js` and commit the generated `frontend/dist.js` too:
 
 ```
 my-plugin/
 └── frontend/
-    └── MyComponent.vue
+    ├── src/
+    │   └── index.js
+    └── dist.js
 ```
 
-The component will be available at `{plugin_id}/MyComponent.vue` in the frontend.
+Build a plugin frontend from the repo root:
+
+```bash
+scripts/build-plugin.sh my-plugin
+```
+
+CI runs the same build and fails if `frontend/dist.js` is not in sync with the source. Plugin packages should include `frontend/dist.js` so Calvin users do not need Node installed.
 
 ### Step 5: Add Dependencies (If Needed)
 

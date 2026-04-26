@@ -23,7 +23,6 @@ from app.plugins.utils.instance_manager import handle_plugin_config_update_gener
 
 
 BACKEND_FIELDS = (
-    BackendConfigField("enabled", default=True, converter=to_bool),
     BackendConfigField("resize_enabled", default=True, converter=to_bool),
     BackendConfigField("max_width", default=1920, converter=to_int),
     BackendConfigField("max_height", default=1080, converter=to_int),
@@ -57,11 +56,6 @@ class ImageProcessorPlugin(BackendPlugin):
             supports_multiple_instances=True,
             common_config_schema={},
             instance_config_schema={
-                "enabled": {
-                    "type": "boolean",
-                    "description": "Enable image processing",
-                    "default": True,
-                },
                 "resize_enabled": {
                     "type": "boolean",
                     "description": "Resize large images",
