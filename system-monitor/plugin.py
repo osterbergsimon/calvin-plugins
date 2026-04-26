@@ -73,13 +73,13 @@ class SystemMonitorServicePlugin(ServicePlugin):
                 "show_temperature": {
                     "type": "boolean",
                     "description": "Show CPU/GPU temperature",
-                    "default": "true",
+                    "default": True,
                     "ui": {"component": "checkbox"},
                 },
                 "show_network": {
                     "type": "boolean",
                     "description": "Show network throughput",
-                    "default": "true",
+                    "default": True,
                     "ui": {"component": "checkbox"},
                 },
                 "temp_unit": {
