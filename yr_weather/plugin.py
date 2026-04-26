@@ -20,6 +20,25 @@ from app.plugins.utils.instance_manager import handle_plugin_config_update_gener
 # Loguru automatically includes module/function info in logs
 
 
+_OWM_ICON_EMOJI = {
+    "01": "☀️",
+    "02": "⛅",
+    "03": "☁️",
+    "04": "☁️",
+    "09": "🌧️",
+    "10": "🌦️",
+    "11": "⛈️",
+    "13": "❄️",
+    "50": "🌫️",
+}
+
+
+def _icon_to_emoji(icon: str | None) -> str:
+    if not icon:
+        return ""
+    return _OWM_ICON_EMOJI.get(icon[:2], "🌡️")
+
+
 CREATE_FIELDS = (
     ServiceConfigField(
         "latitude",
@@ -190,6 +209,13 @@ class YrWeatherServicePlugin(ServicePlugin):
                     "units": {"type": "string"},
                 },
                 "render_template": "weather",  # Reuse the same WeatherWidget component!
+            },
+            statusbar_schema={
+                "kind": "status-tile",
+                "icon_path": "$.current.display.emoji",
+                "value_path": "$.current.display.temperature_rounded",
+                "unit": "°C",
+                "poll_interval_ms": 600000,
             },
         )
 
@@ -456,17 +482,24 @@ class YrWeatherServicePlugin(ServicePlugin):
                 or "clearsky_day"
             )
 
+            owm_icon = self._map_symbol_code_to_icon(symbol_code)
+            air_temp = instant.get("air_temperature", 0)
             current = {
-                "temperature": instant.get("air_temperature", 0),
+                "temperature": air_temp,
                 "feels_like": instant.get(
                     "air_temperature", 0
                 ),  # Yr.no doesn't provide feels_like, use air temp
                 "humidity": instant.get("relative_humidity", 0),
                 "pressure": instant.get("air_pressure_at_sea_level", 0) / 100,  # Convert Pa to hPa
                 "description": self._get_description_from_symbol(symbol_code),
-                "icon": self._map_symbol_code_to_icon(symbol_code),
+                "icon": owm_icon,
                 "wind_speed": instant.get("wind_speed", 0),
                 "wind_direction": instant.get("wind_from_direction", 0),
+                # Pre-shaped fields the schema-driven statusbar binds to.
+                "display": {
+                    "emoji": _icon_to_emoji(owm_icon),
+                    "temperature_rounded": round(air_temp) if air_temp is not None else None,
+                },
             }
 
             # Process forecast - group by day
