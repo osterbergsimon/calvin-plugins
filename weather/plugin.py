@@ -20,6 +20,25 @@ from app.plugins.utils.instance_manager import handle_plugin_config_update_gener
 # Loguru automatically includes module/function info in logs
 
 
+_OWM_ICON_EMOJI = {
+    "01": "☀️",
+    "02": "⛅",
+    "03": "☁️",
+    "04": "☁️",
+    "09": "🌧️",
+    "10": "🌦️",
+    "11": "⛈️",
+    "13": "❄️",
+    "50": "🌫️",
+}
+
+
+def _icon_to_emoji(icon: str | None) -> str:
+    if not icon:
+        return ""
+    return _OWM_ICON_EMOJI.get(icon[:2], "🌡️")
+
+
 CREATE_FIELDS = (
     ServiceConfigField(
         "api_key",
@@ -199,7 +218,11 @@ class WeatherServicePlugin(ServicePlugin):
                 "render_template": "weather",
             },
             statusbar_schema={
-                "component": "weather/WeatherStatusbar.vue",
+                "kind": "status-tile",
+                "icon_path": "$.current.display.emoji",
+                "value_path": "$.current.display.temperature_rounded",
+                "unit_path": "$.current.display.unit_label",
+                "poll_interval_ms": 600000,
             },
         )
 
@@ -353,15 +376,23 @@ class WeatherServicePlugin(ServicePlugin):
             forecast_data = forecast_response.json()
 
             # Process current weather
+            owm_icon = current_data["weather"][0]["icon"]
+            air_temp = current_data["main"]["temp"]
             current = {
-                "temperature": current_data["main"]["temp"],
+                "temperature": air_temp,
                 "feels_like": current_data["main"]["feels_like"],
                 "humidity": current_data["main"]["humidity"],
                 "pressure": current_data["main"]["pressure"],
                 "description": current_data["weather"][0]["description"],
-                "icon": current_data["weather"][0]["icon"],
+                "icon": owm_icon,
                 "wind_speed": current_data.get("wind", {}).get("speed", 0),
                 "wind_direction": current_data.get("wind", {}).get("deg", 0),
+                "display": {
+                    "emoji": _icon_to_emoji(owm_icon),
+                    "temperature_rounded": round(air_temp) if air_temp is not None else None,
+                    "unit_label": "°F" if self.units == "imperial"
+                    else "K" if self.units == "kelvin" else "°C",
+                },
             }
 
             # Process forecast - group by day and get daily min/max
