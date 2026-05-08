@@ -161,6 +161,7 @@ class MyServicePlugin(ServicePlugin):
             },
             display_schema={
                 "type": "api",
+                "title": "My Plugin",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
             },
@@ -274,7 +275,36 @@ The generated scaffold already wires the correct helper family for each plugin t
 
 ### Step 4: Add Frontend Components (Optional)
 
-Prefer schema-driven host renderers when they fit. If your plugin needs a custom web component, keep the source in `frontend/src/index.js` and commit the generated `frontend/dist.js` too:
+Prefer schema-driven host renderers when they fit. Calvin wraps service plugins in a shared dashboard shell, so plugin renderers should provide body content and avoid drawing their own outer dashboard header.
+
+Display schemas can set these optional shell fields:
+
+```python
+display_schema={
+    "kind": "card-grid",
+    "title": "Meal Plan",
+    "title_path": "$.location",
+    "panel_variant": "dense",
+    "api_endpoint": "/api/plugins/{service_id}/data",
+}
+```
+
+- `title_path`: first choice for the dashboard region title, resolved from fetched service data
+- `title`: fallback title when `title_path` is missing or empty
+- `panel_variant`: one of `default`, `dense`, `media`, or `iframe`
+
+Use `default` for normal cards/lists, `dense` for compact metric-heavy panels, `media` for image/video/art-first content, and `iframe` for embedded pages. If title fields are omitted, Calvin falls back to the service/plugin name.
+
+Schema renderers and web components should fill the body area Calvin provides. For schema-rendered content, prefer Calvin's shared body classes when custom markup is unavoidable:
+
+- `calvin-plugin-fill`
+- `calvin-plugin-grid`, `calvin-plugin-grid--auto`, `calvin-plugin-grid--dense`, `calvin-plugin-grid--2`, `calvin-plugin-grid--3`
+- `calvin-plugin-list`, `calvin-plugin-list--scroll`
+- `calvin-plugin-surface`, `calvin-plugin-row`, `calvin-plugin-metric`, `calvin-plugin-clickable`
+- `calvin-plugin-section`, `calvin-plugin-toolbar`, `calvin-plugin-media`
+- `calvin-plugin-empty`, `calvin-plugin-loading`, `calvin-plugin-error`
+
+If your plugin needs a custom web component, keep the source in `frontend/src/index.js` and commit the generated `frontend/dist.js` too:
 
 ```
 my-plugin/

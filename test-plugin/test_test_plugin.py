@@ -5,28 +5,20 @@ These tests should be run from the backend directory:
     pytest ../calvin-plugins/test-plugin/test_test_plugin.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 # Note: These tests assume the plugin is installed and the backend imports are available
 # In a real scenario, you'd run these tests in the calvin backend context
 try:
     from app.plugins.base import PluginType
-    from app.plugins.hooks import hookimpl
-    from app.plugins.protocols import ServicePlugin
-    from app.plugins.utils.config import extract_config_value, to_str
-    from app.plugins.utils.instance_manager import (
-        InstanceManagerConfig,
-        handle_plugin_config_update_generic,
-    )
-    
+
     # Import the plugin
-    import sys
     from pathlib import Path
+
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
         import importlib.util
+
         spec = importlib.util.spec_from_file_location("test_plugin", plugin_path)
         if spec and spec.loader:
             test_plugin_module = importlib.util.module_from_spec(spec)
@@ -56,6 +48,7 @@ def test_plugin():
 
 class TestTestServicePlugin:
     """Tests for TestServicePlugin class."""
+
     """Tests for TestServicePlugin class."""
 
     def test_get_plugin_metadata(self):
@@ -69,6 +62,8 @@ class TestTestServicePlugin:
         assert "message" in metadata["common_config_schema"]
         assert "instance_config_schema" in metadata
         assert metadata["instance_config_schema"] == {}
+        assert metadata["display_schema"]["title"] == "Test Plugin"
+        assert metadata["display_schema"]["panel_variant"] == "iframe"
 
     def test_init(self, test_plugin):
         """Test plugin initialization."""
@@ -132,8 +127,12 @@ class TestTestServicePlugin:
         # validate_config is lenient for test plugin - it converts types
         # extract_config_value with to_str converts 123 to "123", so it's valid
         # For a test plugin, being lenient is acceptable
-        assert await test_plugin.validate_config({"message": 123}) is True  # Converted to "123"
-        assert await test_plugin.validate_config({"message": None}) is True  # None is allowed
+        assert (
+            await test_plugin.validate_config({"message": 123}) is True
+        )  # Converted to "123"
+        assert (
+            await test_plugin.validate_config({"message": None}) is True
+        )  # None is allowed
 
     @pytest.mark.asyncio
     async def test_configure(self, test_plugin):
@@ -170,15 +169,17 @@ class TestTestPluginHooks:
 
     async def test_handle_plugin_config_update(self):
         """Test handle_plugin_config_update hook.
-        
+
         Note: This test is skipped when run from the plugin directory because it requires
         the `test_db` fixture which is only available in the backend test suite.
-        
+
         To test handle_plugin_config_update hooks, run the backend test suite from the
         backend directory:
             cd backend
             pytest tests/unit/test_plugin_hooks.py
         """
-        pytest.skip("Requires backend test fixtures (test_db). "
-                   "Run from backend directory: "
-                   "cd backend && pytest tests/unit/test_plugin_hooks.py")
+        pytest.skip(
+            "Requires backend test fixtures (test_db). "
+            "Run from backend directory: "
+            "cd backend && pytest tests/unit/test_plugin_hooks.py"
+        )

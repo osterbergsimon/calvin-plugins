@@ -17,11 +17,15 @@ try:
 
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
-        spec = importlib.util.spec_from_file_location("system_monitor_plugin", plugin_path)
+        spec = importlib.util.spec_from_file_location(
+            "system_monitor_plugin", plugin_path
+        )
         if spec and spec.loader:
             system_monitor_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(system_monitor_module)
-            SystemMonitorServicePlugin = system_monitor_module.SystemMonitorServicePlugin
+            SystemMonitorServicePlugin = (
+                system_monitor_module.SystemMonitorServicePlugin
+            )
         else:
             pytest.skip("Could not load system-monitor plugin module")
     else:
@@ -49,6 +53,9 @@ class TestSystemMonitorServicePlugin:
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["supports_multiple_instances"] is False
         assert metadata["plugin_class"] is SystemMonitorServicePlugin
+        assert metadata["display_schema"]["title"] == "System Monitor"
+        assert metadata["display_schema"]["panel_variant"] == "dense"
+        assert metadata["display_schema"]["kind"] == "metric-dashboard"
 
     @pytest.mark.asyncio
     async def test_get_content(self, system_monitor_plugin):

@@ -129,10 +129,11 @@ Quick checklist:
 2. ✅ Create plugin/theme directory (e.g., `my-plugin/` or `my-theme/`)
 3. ✅ Add `plugin.json` or `theme.json` with required fields
 4. ✅ For plugins: Add `plugin.py` with plugin implementation
-5. ✅ Optionally add `frontend/` and `assets/` directories
-6. ✅ Test your plugin/theme locally
-7. ✅ Run `python3 scripts/rebuild-manifest.py` to update `plugins.json` (or let CI do it)
-8. ✅ Submit a pull request
+5. ✅ For service plugins: set `display_schema.title` or `title_path` and use the shared dashboard shell variants/classes described in the guide
+6. ✅ Optionally add `frontend/` and `assets/` directories
+7. ✅ Test your plugin/theme locally
+8. ✅ Run `python3 scripts/rebuild-manifest.py` to update `plugins.json` (or let CI do it)
+9. ✅ Submit a pull request
 
 ## Plugin Format Version
 

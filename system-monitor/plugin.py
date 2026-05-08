@@ -36,7 +36,9 @@ def _vcgencmd_temp() -> float | None:
     if not shutil.which("vcgencmd"):
         return None
     try:
-        out = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=2, text=True)
+        out = subprocess.check_output(
+            ["vcgencmd", "measure_temp"], timeout=2, text=True
+        )
         # output: "temp=42.8'C"
         return float(out.strip().split("=")[1].replace("'C", ""))
     except Exception:
@@ -50,7 +52,9 @@ def _cpu_temp() -> float | None:
         return pi_temp
     if not _PSUTIL_AVAILABLE:
         return None
-    temps = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+    temps = (
+        psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+    )
     for key in ("cpu_thermal", "coretemp", "k10temp", "acpitz"):
         entries = temps.get(key, [])
         if entries:
@@ -103,6 +107,8 @@ class SystemMonitorServicePlugin(ServicePlugin):
             },
             display_schema={
                 "kind": "metric-dashboard",
+                "title": "System Monitor",
+                "panel_variant": "dense",
                 "data_path": "$.display.tiles",
                 "tile": {
                     "icon_path": "$.icon",
@@ -253,27 +259,59 @@ class SystemMonitorServicePlugin(ServicePlugin):
         unit_label = f"°{data.get('temp_unit', self.temp_unit)}"
 
         tiles = [
-            {"icon": "🖥️", "label": "CPU", "value": cpu, "unit": "%",
-             "status": self._pct_status(cpu)},
-            {"icon": "💾", "label": "Memory", "value": mem_pct, "unit": "%",
-             "status": self._pct_status(mem_pct)},
-            {"icon": "💽", "label": "Disk", "value": disk_pct, "unit": "%",
-             "status": self._pct_status(disk_pct)},
+            {
+                "icon": "🖥️",
+                "label": "CPU",
+                "value": cpu,
+                "unit": "%",
+                "status": self._pct_status(cpu),
+            },
+            {
+                "icon": "💾",
+                "label": "Memory",
+                "value": mem_pct,
+                "unit": "%",
+                "status": self._pct_status(mem_pct),
+            },
+            {
+                "icon": "💽",
+                "label": "Disk",
+                "value": disk_pct,
+                "unit": "%",
+                "status": self._pct_status(disk_pct),
+            },
         ]
         if temp is not None:
-            tiles.append({
-                "icon": "🌡️", "label": "Temp", "value": temp, "unit": unit_label,
-                "status": self._temp_status(temp),
-            })
+            tiles.append(
+                {
+                    "icon": "🌡️",
+                    "label": "Temp",
+                    "value": temp,
+                    "unit": unit_label,
+                    "status": self._temp_status(temp),
+                }
+            )
 
         row = [
-            {"label": "CPU", "value": round(cpu) if cpu is not None else None, "unit": "%"},
-            {"label": "RAM", "value": round(mem_pct) if mem_pct is not None else None, "unit": "%"},
+            {
+                "label": "CPU",
+                "value": round(cpu) if cpu is not None else None,
+                "unit": "%",
+            },
+            {
+                "label": "RAM",
+                "value": round(mem_pct) if mem_pct is not None else None,
+                "unit": "%",
+            },
         ]
         if temp is not None:
-            row.append({
-                "value": temp, "unit": unit_label, "status": self._temp_status(temp),
-            })
+            row.append(
+                {
+                    "value": temp,
+                    "unit": unit_label,
+                    "status": self._temp_status(temp),
+                }
+            )
 
         return {"tiles": tiles, "row": row}
 
@@ -288,7 +326,9 @@ class SystemMonitorServicePlugin(ServicePlugin):
         self.show_network = extract_config_value(
             config, "show_network", default=True, converter=to_bool
         )
-        self.temp_unit = extract_config_value(config, "temp_unit", default="C", converter=to_str)
+        self.temp_unit = extract_config_value(
+            config, "temp_unit", default="C", converter=to_str
+        )
 
 
 @hookimpl

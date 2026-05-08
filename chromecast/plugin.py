@@ -70,6 +70,9 @@ class ChromecastServicePlugin(ServicePlugin):
             },
             display_schema={
                 "kind": "web-component",
+                "title": "Chromecast",
+                "title_path": "$.device_name",
+                "panel_variant": "media",
                 "element": "calvin-chromecast-now-playing",
                 "module": "dist.js",
                 "poll_interval_ms": 10 * 1000,
@@ -117,14 +120,18 @@ class ChromecastServicePlugin(ServicePlugin):
         if not _PYCHROMECAST_AVAILABLE:
             return {"state": "error", "error": "pychromecast is not installed"}
 
-        return await asyncio.get_event_loop().run_in_executor(None, self._get_cast_status)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self._get_cast_status
+        )
 
     def _get_cast_status(self) -> dict[str, Any]:
         """Blocking call — runs in a thread pool via run_in_executor."""
         browser = None
         cast = None
         try:
-            chromecasts, browser = pychromecast.get_chromecasts(timeout=self.discovery_timeout)
+            chromecasts, browser = pychromecast.get_chromecasts(
+                timeout=self.discovery_timeout
+            )
 
             if not chromecasts:
                 return {"state": "no_devices"}
@@ -206,7 +213,9 @@ class ChromecastServicePlugin(ServicePlugin):
 
     async def configure(self, config: dict[str, Any]) -> None:
         await super().configure(config)
-        self.device_name = extract_config_value(config, "device_name", default="", converter=to_str)
+        self.device_name = extract_config_value(
+            config, "device_name", default="", converter=to_str
+        )
         self.discovery_timeout = extract_config_value(
             config, "discovery_timeout", default=5, converter=to_int
         )

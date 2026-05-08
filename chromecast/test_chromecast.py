@@ -37,6 +37,9 @@ class TestChromecastServicePlugin:
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["supports_multiple_instances"] is True
         assert metadata["display_schema"]["kind"] == "web-component"
+        assert metadata["display_schema"]["title"] == "Chromecast"
+        assert metadata["display_schema"]["title_path"] == "$.device_name"
+        assert metadata["display_schema"]["panel_variant"] == "media"
         assert metadata["display_schema"]["element"] == "calvin-chromecast-now-playing"
         assert metadata["display_schema"]["module"] == "dist.js"
 
@@ -61,7 +64,9 @@ class TestChromecastServicePlugin:
 
         with (
             patch.object(chromecast_module, "_PYCHROMECAST_AVAILABLE", True),
-            patch.object(chromecast_module, "pychromecast", fake_pychromecast, create=True),
+            patch.object(
+                chromecast_module, "pychromecast", fake_pychromecast, create=True
+            ),
             patch("asyncio.get_event_loop") as get_event_loop,
         ):
             loop = MagicMock()

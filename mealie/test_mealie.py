@@ -5,8 +5,7 @@ These tests should be run from the backend directory:
     pytest ../calvin-plugins/mealie/test_mealie.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 import httpx
@@ -15,16 +14,8 @@ import httpx
 # In a real scenario, you'd run these tests in the calvin backend context
 try:
     from app.plugins.base import PluginType
-    from app.plugins.hooks import hookimpl
-    from app.plugins.protocols import ServicePlugin
-    from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
-    from app.plugins.utils.instance_manager import (
-        InstanceManagerConfig,
-        handle_plugin_config_update_generic,
-    )
 
     # Import the plugin
-    import sys
     from pathlib import Path
 
     plugin_path = Path(__file__).parent / "plugin.py"
@@ -76,6 +67,8 @@ class TestMealieServicePlugin:
         assert "mealie_url" in metadata["instance_config_schema"]
         assert "api_token" in metadata["instance_config_schema"]
         assert "days_ahead" in metadata["instance_config_schema"]
+        assert metadata["display_schema"]["title"] == "Meal Plan"
+        assert metadata["display_schema"]["kind"] == "card-grid"
 
     def test_init(self, mealie_plugin):
         """Test plugin initialization."""
@@ -163,7 +156,10 @@ class TestMealieServicePlugin:
                     {
                         "date": "2099-01-01",
                         "meals": [
-                            {"type": "lunch", "recipe": {"name": "Soup", "slug": "soup"}},
+                            {
+                                "type": "lunch",
+                                "recipe": {"name": "Soup", "slug": "soup"},
+                            },
                         ],
                     }
                 ]
@@ -251,7 +247,9 @@ class TestMealieServicePlugin:
         assert content["url"] == "/api/plugins/mealie-instance/data"
         assert content["data"]["mealie_url"] == "http://mealie.local:9000"
         assert content["data"]["group_id"] is None
-        assert "api_token" in content["data"]  # Token is in data but not exposed to frontend
+        assert (
+            "api_token" in content["data"]
+        )  # Token is in data but not exposed to frontend
         assert content["config"]["allowFullscreen"] is True
 
     @pytest.mark.asyncio
@@ -323,7 +321,9 @@ class TestMealieServicePlugin:
         """Test config validation with missing URL."""
         assert await mealie_plugin.validate_config({"api_token": "test-token"}) is False
         assert (
-            await mealie_plugin.validate_config({"mealie_url": "", "api_token": "test-token"})
+            await mealie_plugin.validate_config(
+                {"mealie_url": "", "api_token": "test-token"}
+            )
             is False
         )
 
@@ -331,7 +331,10 @@ class TestMealieServicePlugin:
     async def test_validate_config_missing_token(self, mealie_plugin):
         """Test config validation with missing token."""
         assert (
-            await mealie_plugin.validate_config({"mealie_url": "http://mealie.local:9000"}) is False
+            await mealie_plugin.validate_config(
+                {"mealie_url": "http://mealie.local:9000"}
+            )
+            is False
         )
         assert (
             await mealie_plugin.validate_config(
