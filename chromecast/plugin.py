@@ -69,7 +69,13 @@ class ChromecastServicePlugin(ServicePlugin):
                 },
             },
             display_schema={
-                "component": "chromecast/NowPlaying.vue",
+                "kind": "web-component",
+                "title": "Chromecast",
+                "title_path": "$.device_name",
+                "panel_variant": "media",
+                "element": "calvin-chromecast-now-playing",
+                "module": "dist.js",
+                "poll_interval_ms": 10 * 1000,
             },
         )
 
