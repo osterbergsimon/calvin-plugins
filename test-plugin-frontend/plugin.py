@@ -49,13 +49,9 @@ class TestFrontendServicePlugin(ServicePlugin):
                 },
             },
             display_schema={
-                "type": "api",
+                "kind": "status-tile",
                 "title": "Test Plugin with Frontend",
-                "panel_variant": "iframe",
-                "api_endpoint": None,
-                "method": None,
-                "data_schema": None,
-                "render_template": "iframe",
+                "value_path": "$.message",
             },
         )
 
