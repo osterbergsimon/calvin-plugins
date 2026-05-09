@@ -160,10 +160,13 @@ class MyServicePlugin(ServicePlugin):
                 },
             },
             display_schema={
-                "type": "api",
+                # Pick a kind from SUPPORTED_DISPLAY_KINDS in
+                # calvin/backend/app/plugins/definitions.py.
+                # See ../calvin/docs/plugins/PLUGIN_FRONTEND_COMPONENTS.md
+                # for renderer-specific fields.
+                "kind": "status-tile",
                 "title": "My Plugin",
-                "api_endpoint": "/api/plugins/{service_id}/data",
-                "method": "GET",
+                "value_path": "$.status",
             },
         )
 
@@ -180,12 +183,13 @@ class MyServicePlugin(ServicePlugin):
         """Cleanup plugin resources."""
         pass
 
-    async def get_content(self) -> dict[str, Any]:
-        """Get service content for display."""
-        return {
-            "type": "api",
-            "url": f"/api/plugins/{self.plugin_id}/data",
-        }
+    async def fetch_service_data(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the data payload that this plugin's display_schema binds to."""
+        return {"status": "ok"}
 
     async def validate_config(self, config: dict[str, Any]) -> bool:
         return bool(str(config.get("api_key", "")).strip())
@@ -339,6 +343,23 @@ If your plugin requires Python packages, add them to `plugin.json`:
 ```
 
 ### Step 6: Test Your Plugin
+
+#### Quick validation
+
+Before writing or running tests, run the validator against your plugin to catch
+manifest typos, import errors, and invalid `display_schema` shapes:
+
+```bash
+python scripts/validate_plugin.py my-plugin
+# or check every plugin in the repo:
+python scripts/validate_plugin.py --all
+```
+
+The validator imports your `plugin.py`, calls `register_plugin_types()`, and
+runs the same `PluginDefinition.from_raw()` validation Calvin runs at install
+time — so anything that fails here would have failed on a Pi. It auto-detects
+the host's `backend/.venv` (set up via `cd ../calvin/backend && uv sync --extra dev`)
+and re-execs under it.
 
 #### Writing Tests
 
@@ -576,8 +597,12 @@ Display web services, APIs, or custom content.
 **Preferred SDK:** `app.plugins.sdk.service`
 
 **Required Methods:**
-- `get_content()` - Get service content for display
 - `validate_config(config)` - Validate configuration
+
+**Should Implement:**
+- `fetch_service_data(start_date, end_date)` - Return the data payload that the
+  plugin's `display_schema` binds to. This is the canonical data source for
+  schema-driven dashboard rendering.
 
 **Example Use Cases:**
 - Iframe embeds

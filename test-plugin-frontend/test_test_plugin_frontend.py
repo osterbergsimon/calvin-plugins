@@ -46,8 +46,9 @@ class TestTestFrontendServicePlugin:
         assert metadata["type_id"] == "test_plugin_frontend"
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["plugin_class"] is _PluginClass
+        assert metadata["display_schema"]["kind"] == "status-tile"
         assert metadata["display_schema"]["title"] == "Test Plugin with Frontend"
-        assert metadata["display_schema"]["panel_variant"] == "iframe"
+        assert metadata["display_schema"]["value_path"] == "$.message"
 
     @pytest.mark.asyncio
     async def test_get_content(self, frontend_plugin):

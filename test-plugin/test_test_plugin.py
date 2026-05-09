@@ -62,8 +62,9 @@ class TestTestServicePlugin:
         assert "message" in metadata["common_config_schema"]
         assert "instance_config_schema" in metadata
         assert metadata["instance_config_schema"] == {}
+        assert metadata["display_schema"]["kind"] == "status-tile"
         assert metadata["display_schema"]["title"] == "Test Plugin"
-        assert metadata["display_schema"]["panel_variant"] == "iframe"
+        assert metadata["display_schema"]["value_path"] == "$.message"
 
     def test_init(self, test_plugin):
         """Test plugin initialization."""
