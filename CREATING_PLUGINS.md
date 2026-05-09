@@ -289,7 +289,6 @@ display_schema={
     "title": "Meal Plan",
     "title_path": "$.location",
     "panel_variant": "dense",
-    "api_endpoint": "/api/plugins/{service_id}/data",
 }
 ```
 

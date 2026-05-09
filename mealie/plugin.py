@@ -149,11 +149,8 @@ class MealieServicePlugin(ServicePlugin):
                 },
             ],
             display_schema={
-                "type": "api",
                 "kind": "card-grid",
                 "title": "Meal Plan",
-                "api_endpoint": "/api/plugins/{service_id}/data",
-                "method": "GET",
                 "poll_interval_ms": 30 * 60 * 1000,
                 "data_path": "$.display.days",
                 "layout": {"columns": "auto-fit-220"},

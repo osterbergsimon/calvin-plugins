@@ -67,8 +67,12 @@ class TestMealieServicePlugin:
         assert "mealie_url" in metadata["instance_config_schema"]
         assert "api_token" in metadata["instance_config_schema"]
         assert "days_ahead" in metadata["instance_config_schema"]
-        assert metadata["display_schema"]["title"] == "Meal Plan"
-        assert metadata["display_schema"]["kind"] == "card-grid"
+        display_schema = metadata["display_schema"]
+        assert display_schema["title"] == "Meal Plan"
+        assert display_schema["kind"] == "card-grid"
+        assert "type" not in display_schema
+        assert "api_endpoint" not in display_schema
+        assert "method" not in display_schema
 
     def test_init(self, mealie_plugin):
         """Test plugin initialization."""

@@ -20,11 +20,8 @@
       class="meal-plan-content"
       :class="[`card-size-${cardSize}`, { 'portrait-mode': isPortrait }]"
     >
-      <div class="meal-plan-header">
-        <h3>Meal Plan</h3>
-        <span class="meal-plan-dates" v-if="dateRange">
-          {{ dateRange }}
-        </span>
+      <div v-if="dateRange" class="meal-plan-range">
+        {{ dateRange }}
       </div>
       <div
         v-if="mealPlanItems.length > 0"
@@ -717,32 +714,13 @@ const gridStyle = computed(() => {
   flex-direction: column;
 }
 
-.meal-plan-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 2px solid var(--border-color);
-  flex-shrink: 0;
-  gap: 1rem;
-}
-
-.meal-plan-header h3 {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
-  flex-shrink: 0;
-}
-
-.meal-plan-dates {
+.meal-plan-range {
   font-size: 0.9rem;
   color: var(--text-secondary);
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
+  margin-bottom: 1rem;
 }
 
 .meal-plan-items {
@@ -761,17 +739,9 @@ const gridStyle = computed(() => {
   padding: 0.75rem;
 }
 
-.meal-plan-content.portrait-mode .meal-plan-header {
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-}
-
-.meal-plan-content.portrait-mode .meal-plan-header h3 {
-  font-size: 1.1rem;
-}
-
-.meal-plan-content.portrait-mode .meal-plan-dates {
+.meal-plan-content.portrait-mode .meal-plan-range {
   font-size: 0.8rem;
+  margin-bottom: 0.5rem;
 }
 
 .meal-plan-content.portrait-mode .meal-plan-items {
