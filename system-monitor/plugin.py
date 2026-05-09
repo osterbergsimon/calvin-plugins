@@ -157,17 +157,6 @@ class SystemMonitorServicePlugin(ServicePlugin):
     async def cleanup(self) -> None:
         pass
 
-    async def get_content(self) -> dict[str, Any]:
-        return {
-            "type": "system_monitor",
-            "url": f"/api/plugins/{self.plugin_id}/data",
-            "config": {
-                "show_temperature": self.show_temperature,
-                "show_network": self.show_network,
-                "temp_unit": self.temp_unit,
-            },
-        }
-
     def get_config(self) -> dict[str, Any]:
         return {
             "url": f"/api/plugins/{self.plugin_id}/data",

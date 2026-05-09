@@ -51,11 +51,9 @@ class TestTestFrontendServicePlugin:
         assert metadata["display_schema"]["value_path"] == "$.message"
 
     @pytest.mark.asyncio
-    async def test_get_content(self, frontend_plugin):
-        content = await frontend_plugin.get_content()
-        assert content["type"] == "iframe"
-        assert content["url"] == "about:blank"
-        assert content["config"]["message"] == "Frontend test message"
+    async def test_fetch_service_data(self, frontend_plugin):
+        content = await frontend_plugin.fetch_service_data()
+        assert content["message"] == "Frontend test message"
 
     @pytest.mark.asyncio
     async def test_validate_config(self, frontend_plugin):

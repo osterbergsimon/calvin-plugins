@@ -278,32 +278,6 @@ class MealieServicePlugin(ServicePlugin):
             await self._client.aclose()
             self._client = None
 
-    async def get_content(self) -> dict[str, Any]:
-        """
-        Get service content for display.
-
-        Returns:
-            Dictionary with content information
-        """
-        # Return a special URL that points to our backend endpoint
-        # The frontend will detect "mealie" type and fetch data from our API
-        # This avoids CORS issues and handles authentication properly
-        # Use generic /data endpoint for forward compatibility
-        meal_plan_api_url = f"/api/plugins/{self.plugin_id}/data"
-
-        return {
-            "type": "mealie",
-            "url": meal_plan_api_url,  # Points to our backend endpoint
-            "data": {
-                "mealie_url": self.mealie_url,
-                "api_token": self.api_token,  # Not sent to frontend, used by backend
-                "group_id": self.group_id,
-            },
-            "config": {
-                "allowFullscreen": True,
-            },
-        }
-
     def get_config(self) -> dict[str, Any]:
         """
         Get plugin configuration.

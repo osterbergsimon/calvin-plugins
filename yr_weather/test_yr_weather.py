@@ -284,16 +284,6 @@ class TestYrWeatherServicePlugin:
             assert yr_weather_plugin.forecast_days == 1
 
     @pytest.mark.asyncio
-    async def test_get_content(self, yr_weather_plugin):
-        """Test getting service content."""
-        content = await yr_weather_plugin.get_content()
-        assert content["type"] == "weather"
-        assert "url" in content
-        assert "data" in content
-        assert content["data"]["latitude"] == 59.9139
-        assert content["data"]["longitude"] == 10.7522
-
-    @pytest.mark.asyncio
     async def test_test_type_config_invalid_coordinates(self):
         result = await YrWeatherServicePlugin.test_type_config(
             {"latitude": 100, "longitude": 10.7522}

@@ -96,23 +96,20 @@ class TestTestServicePlugin:
         # Should not raise any errors
 
     @pytest.mark.asyncio
-    async def test_get_content(self, test_plugin):
-        """Test getting service content."""
-        content = await test_plugin.get_content()
-        assert content["type"] == "iframe"
-        assert content["url"] == "about:blank"
-        assert "config" in content
-        assert content["config"]["message"] == "Test message"
+    async def test_fetch_service_data(self, test_plugin):
+        """Test schema-driven service data."""
+        content = await test_plugin.fetch_service_data()
+        assert content["message"] == "Test message"
 
     @pytest.mark.asyncio
-    async def test_get_content_with_default_message(self):
-        """Test getting content with default message."""
+    async def test_fetch_service_data_with_default_message(self):
+        """Test schema-driven service data with default message."""
         plugin = _PluginClass(
             plugin_id="test-plugin-instance",
             name="Test Plugin",
         )
-        content = await plugin.get_content()
-        assert content["config"]["message"] == "Hello from test plugin!"
+        content = await plugin.fetch_service_data()
+        assert content["message"] == "Hello from test plugin!"
 
     @pytest.mark.asyncio
     async def test_validate_config_valid(self, test_plugin):

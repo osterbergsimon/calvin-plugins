@@ -81,16 +81,6 @@ class TestFrontendServicePlugin(ServicePlugin):
         """Schema-driven data source: status-tile reads $.message from this payload."""
         return {"message": self.message}
 
-    async def get_content(self) -> dict[str, Any]:
-        """Get service content for display."""
-        return {
-            "type": "iframe",
-            "url": "about:blank",
-            "config": {
-                "message": self.message,
-            },
-        }
-
     async def validate_config(self, config: dict[str, Any]) -> bool:
         """Validate plugin configuration."""
         return True
