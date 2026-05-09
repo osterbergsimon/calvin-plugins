@@ -178,11 +178,8 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             ui_actions=[],
             display_schema={
-                "type": "api",
                 "kind": "weather-forecast",
                 "title": "Weather",
-                "api_endpoint": "/api/plugins/{service_id}/data",
-                "method": "GET",
                 "poll_interval_ms": 600000,
                 "title_path": "$.location",
                 "current_path": "$.current",

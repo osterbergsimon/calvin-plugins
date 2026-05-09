@@ -67,10 +67,14 @@ class TestYrWeatherServicePlugin:
         assert "instance_config_schema" in metadata
         assert "latitude" in metadata["instance_config_schema"]
         assert "longitude" in metadata["instance_config_schema"]
-        assert metadata["display_schema"]["kind"] == "weather-forecast"
-        assert metadata["display_schema"]["title"] == "Weather"
-        assert metadata["display_schema"]["title_path"] == "$.location"
-        assert metadata["display_schema"]["current"]["icon_path"] == "$.display.icon"
+        display_schema = metadata["display_schema"]
+        assert display_schema["kind"] == "weather-forecast"
+        assert display_schema["title"] == "Weather"
+        assert display_schema["title_path"] == "$.location"
+        assert display_schema["current"]["icon_path"] == "$.display.icon"
+        assert "type" not in display_schema
+        assert "api_endpoint" not in display_schema
+        assert "method" not in display_schema
 
     def test_symbol_code_to_mdi_icon(self, yr_weather_plugin):
         """Test Yr symbol to host weather icon mapping."""
