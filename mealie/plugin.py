@@ -151,6 +151,7 @@ class MealieServicePlugin(ServicePlugin):
             display_schema={
                 "type": "api",
                 "kind": "card-grid",
+                "title": "Meal Plan",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
                 "poll_interval_ms": 30 * 60 * 1000,
@@ -257,7 +258,8 @@ class MealieServicePlugin(ServicePlugin):
         """Initialize the plugin."""
         # Validate URL
         if not self.mealie_url or not (
-            self.mealie_url.startswith("http://") or self.mealie_url.startswith("https://")
+            self.mealie_url.startswith("http://")
+            or self.mealie_url.startswith("https://")
         ):
             raise ValueError(f"Invalid Mealie URL: {self.mealie_url}")
 
@@ -354,7 +356,10 @@ class MealieServicePlugin(ServicePlugin):
                     data["_metadata"] = {}
                 data["_metadata"]["mealie_url"] = self.mealie_url.rstrip("/")
             elif isinstance(data, list):
-                data = {"items": data, "_metadata": {"mealie_url": self.mealie_url.rstrip("/")}}
+                data = {
+                    "items": data,
+                    "_metadata": {"mealie_url": self.mealie_url.rstrip("/")},
+                }
 
         if isinstance(data, dict):
             data["display"] = self._build_display_data(data, start_date, end_date)
@@ -369,7 +374,11 @@ class MealieServicePlugin(ServicePlugin):
     ) -> dict[str, Any]:
         """Build host-renderable meal plan display data."""
         raw_items = self._extract_meal_items(data)
-        start = self._parse_date(start_date) or self._first_item_date(raw_items) or date.today()
+        start = (
+            self._parse_date(start_date)
+            or self._first_item_date(raw_items)
+            or date.today()
+        )
         end = (
             self._parse_date(end_date)
             or self._last_item_date(raw_items)
@@ -417,7 +426,9 @@ class MealieServicePlugin(ServicePlugin):
             if isinstance(meals, list):
                 for meal in meals:
                     if isinstance(meal, dict):
-                        flat_items.append({**meal, "date": meal.get("date") or item.get("date")})
+                        flat_items.append(
+                            {**meal, "date": meal.get("date") or item.get("date")}
+                        )
                 continue
             flat_items.append(item)
         return flat_items
@@ -425,7 +436,12 @@ class MealieServicePlugin(ServicePlugin):
     def _shape_meal(self, item: dict[str, Any]) -> dict[str, Any]:
         recipe = item.get("recipe") if isinstance(item.get("recipe"), dict) else {}
         meal_type = item.get("entryType") or item.get("type") or "meal"
-        name = recipe.get("name") or item.get("recipeName") or item.get("title") or "No recipe"
+        name = (
+            recipe.get("name")
+            or item.get("recipeName")
+            or item.get("title")
+            or "No recipe"
+        )
         return {
             "type": str(meal_type),
             "name": str(name),
@@ -451,11 +467,15 @@ class MealieServicePlugin(ServicePlugin):
             return None
 
     def _first_item_date(self, items: list[dict[str, Any]]) -> date | None:
-        dates = [parsed for item in items if (parsed := self._parse_date(item.get("date")))]
+        dates = [
+            parsed for item in items if (parsed := self._parse_date(item.get("date")))
+        ]
         return min(dates) if dates else None
 
     def _last_item_date(self, items: list[dict[str, Any]]) -> date | None:
-        dates = [parsed for item in items if (parsed := self._parse_date(item.get("date")))]
+        dates = [
+            parsed for item in items if (parsed := self._parse_date(item.get("date")))
+        ]
         return max(dates) if dates else None
 
     async def _fetch_meal_plan(
@@ -515,7 +535,10 @@ class MealieServicePlugin(ServicePlugin):
             endpoints_to_try = [
                 ("/api/households/mealplans", params),
                 # Try without group_id if it was specified
-                ("/api/households/mealplans", {k: v for k, v in params.items() if k != "group_id"}),
+                (
+                    "/api/households/mealplans",
+                    {k: v for k, v in params.items() if k != "group_id"},
+                ),
                 # Try alternative endpoints
                 ("/api/meal-plans", params),
                 ("/api/mealplan", params),
@@ -554,7 +577,9 @@ class MealieServicePlugin(ServicePlugin):
                         return data
                     elif response.status_code == 404:
                         # Try next endpoint
-                        logger.debug(f"[Mealie] Endpoint {endpoint} returned 404, trying next...")
+                        logger.debug(
+                            f"[Mealie] Endpoint {endpoint} returned 404, trying next..."
+                        )
                         continue
                     else:
                         # Log non-200, non-404 responses
@@ -593,8 +618,12 @@ class MealieServicePlugin(ServicePlugin):
 
             # If all endpoints failed, return empty meal plan
             tried_endpoints = [e[0] for e in endpoints_to_try]
-            logger.error(f"[Mealie] Could not find meal plan endpoint. Tried: {tried_endpoints}")
-            logger.error(f"[Mealie] Date range: {today.isoformat()} to {week_end.isoformat()}")
+            logger.error(
+                f"[Mealie] Could not find meal plan endpoint. Tried: {tried_endpoints}"
+            )
+            logger.error(
+                f"[Mealie] Date range: {today.isoformat()} to {week_end.isoformat()}"
+            )
             logger.error(f"[Mealie] Group ID: {self.group_id or 'not specified'}")
             return {
                 "items": [],
@@ -607,9 +636,7 @@ class MealieServicePlugin(ServicePlugin):
             error_detail = f"HTTP error: {e.response.status_code}"
             # Add more detail for 401 errors
             if e.response.status_code == 401:
-                error_detail = (
-                    "HTTP error: 401 - Authentication failed. Please check your API token."
-                )
+                error_detail = "HTTP error: 401 - Authentication failed. Please check your API token."
                 # Log response body for debugging (may contain useful error info)
                 try:
                     response_body = e.response.text
@@ -641,13 +668,17 @@ class MealieServicePlugin(ServicePlugin):
                 except Exception:
                     pass
 
-            logger.error(f"[Mealie] HTTP error fetching meal plan: {e.response.status_code}")
+            logger.error(
+                f"[Mealie] HTTP error fetching meal plan: {e.response.status_code}"
+            )
             logger.error(f"[Mealie] Request URL: {e.request.url}")
             logger.error(f"[Mealie] Request method: {e.request.method}")
             # Log token status (without exposing the actual token)
             token_status = "present" if self.api_token else "missing"
             token_length = len(self.api_token) if self.api_token else 0
-            logger.error(f"[Mealie] API token status: {token_status} (length: {token_length})")
+            logger.error(
+                f"[Mealie] API token status: {token_status} (length: {token_length})"
+            )
             logger.error(f"[Mealie] Mealie URL: {self.mealie_url}")
             return {
                 "items": [],
@@ -682,8 +713,12 @@ class MealieServicePlugin(ServicePlugin):
             True if configuration is valid
         """
         # Check required fields
-        mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
-        api_token = extract_config_value(config, "api_token", default="", converter=to_str)
+        mealie_url = extract_config_value(
+            config, "mealie_url", default="", converter=to_str
+        )
+        api_token = extract_config_value(
+            config, "api_token", default="", converter=to_str
+        )
 
         if not mealie_url or not mealie_url.strip():
             return False
@@ -697,7 +732,9 @@ class MealieServicePlugin(ServicePlugin):
 
         # Days ahead should be valid if provided
         if "days_ahead" in config:
-            days_ahead = extract_config_value(config, "days_ahead", default=7, converter=to_int)
+            days_ahead = extract_config_value(
+                config, "days_ahead", default=7, converter=to_int
+            )
             if days_ahead < 1 or days_ahead > 30:
                 return False
 
@@ -717,13 +754,19 @@ class MealieServicePlugin(ServicePlugin):
             await self._client.aclose()
 
         if "mealie_url" in config:
-            mealie_url = extract_config_value(config, "mealie_url", default="", converter=to_str)
+            mealie_url = extract_config_value(
+                config, "mealie_url", default="", converter=to_str
+            )
             self.mealie_url = mealie_url.rstrip("/") if mealie_url else ""
         if "api_token" in config:
-            api_token = extract_config_value(config, "api_token", default="", converter=to_str)
+            api_token = extract_config_value(
+                config, "api_token", default="", converter=to_str
+            )
             self.api_token = api_token.strip() if api_token else ""
         if "group_id" in config:
-            group_id = extract_config_value(config, "group_id", default="", converter=to_str)
+            group_id = extract_config_value(
+                config, "group_id", default="", converter=to_str
+            )
             self.group_id = group_id.strip() if group_id else None
         if "days_ahead" in config:
             self.days_ahead = extract_config_value(
@@ -749,24 +792,34 @@ class MealieServicePlugin(ServicePlugin):
         from app.models.db_models import PluginDB
 
         try:
-            logger.debug(f"[Mealie] Reloading config from DB for plugin_id: {self.plugin_id}")
+            logger.debug(
+                f"[Mealie] Reloading config from DB for plugin_id: {self.plugin_id}"
+            )
             db_plugin = await PluginDB.objects.get_or_none(id=self.plugin_id)
 
             if not db_plugin:
-                logger.warning(f"[Mealie] Plugin {self.plugin_id} not found in database")
+                logger.warning(
+                    f"[Mealie] Plugin {self.plugin_id} not found in database"
+                )
                 return
 
             if not db_plugin.config:
-                logger.warning(f"[Mealie] Plugin {self.plugin_id} has no config in database")
+                logger.warning(
+                    f"[Mealie] Plugin {self.plugin_id} has no config in database"
+                )
                 return
 
             config = db_plugin.config
-            logger.debug(f"[Mealie] Found config in DB with keys: {list(config.keys())}")
+            logger.debug(
+                f"[Mealie] Found config in DB with keys: {list(config.keys())}"
+            )
 
             # Check if API token has changed
             new_api_token = config.get("api_token", "")
             if isinstance(new_api_token, dict):
-                new_api_token = new_api_token.get("value") or new_api_token.get("default") or ""
+                new_api_token = (
+                    new_api_token.get("value") or new_api_token.get("default") or ""
+                )
             new_api_token = str(new_api_token).strip() if new_api_token else ""
 
             current_token_length = len(self.api_token) if self.api_token else 0
@@ -824,8 +877,12 @@ class MealieServicePlugin(ServicePlugin):
                         user_data = response.json()
                         user_id = user_data.get("id", "unknown")
                         username = user_data.get("username", "unknown")
-                        test_results.append(f"Authentication successful (user: {username})")
-                        logger.info(f"[Mealie Test] User authenticated: {username} (ID: {user_id})")
+                        test_results.append(
+                            f"Authentication successful (user: {username})"
+                        )
+                        logger.info(
+                            f"[Mealie Test] User authenticated: {username} (ID: {user_id})"
+                        )
                     elif response.status_code == 401:
                         return {
                             "success": False,
@@ -878,7 +935,9 @@ class MealieServicePlugin(ServicePlugin):
                             data = response.json()
                             item_count = 0
                             if isinstance(data, dict):
-                                item_count = len(data.get("items", [])) if "items" in data else 0
+                                item_count = (
+                                    len(data.get("items", [])) if "items" in data else 0
+                                )
                             elif isinstance(data, list):
                                 item_count = len(data)
                             test_results.append(
@@ -1047,9 +1106,15 @@ async def handle_plugin_config_update(
             "mealie_url": mealie_url,
             "api_token": api_token,
             "group_id": group_id,
-            "days_ahead": extract_config_value(c, "days_ahead", default=7, converter=to_int),
-            "display_order": extract_config_value(c, "display_order", default=0, converter=to_int),
-            "fullscreen": extract_config_value(c, "fullscreen", default=False, converter=to_bool),
+            "days_ahead": extract_config_value(
+                c, "days_ahead", default=7, converter=to_int
+            ),
+            "display_order": extract_config_value(
+                c, "display_order", default=0, converter=to_int
+            ),
+            "fullscreen": extract_config_value(
+                c, "fullscreen", default=False, converter=to_bool
+            ),
         }
 
     def validate_config(c: dict[str, Any]) -> bool:

@@ -47,6 +47,8 @@ class TestServicePlugin(ServicePlugin):
             },
             display_schema={
                 "type": "api",
+                "title": "Test Plugin",
+                "panel_variant": "iframe",
                 "api_endpoint": None,
                 "method": None,
                 "data_schema": None,

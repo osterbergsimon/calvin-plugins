@@ -16,7 +16,9 @@ SERVICE_FIELDS = (
         "message",
         default="Hello from test plugin with frontend!",
         converter=str,
-        transform=lambda value: str(value) if value else "Hello from test plugin with frontend!",
+        transform=lambda value: str(value)
+        if value
+        else "Hello from test plugin with frontend!",
     ),
 )
 
@@ -48,6 +50,8 @@ class TestFrontendServicePlugin(ServicePlugin):
             },
             display_schema={
                 "type": "api",
+                "title": "Test Plugin with Frontend",
+                "panel_variant": "iframe",
                 "api_endpoint": None,
                 "method": None,
                 "data_schema": None,

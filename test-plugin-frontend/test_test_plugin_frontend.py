@@ -15,7 +15,9 @@ try:
 
     plugin_path = Path(__file__).parent / "plugin.py"
     if plugin_path.exists():
-        spec = importlib.util.spec_from_file_location("test_plugin_frontend_plugin", plugin_path)
+        spec = importlib.util.spec_from_file_location(
+            "test_plugin_frontend_plugin", plugin_path
+        )
         if spec and spec.loader:
             frontend_plugin_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(frontend_plugin_module)
@@ -44,6 +46,8 @@ class TestTestFrontendServicePlugin:
         assert metadata["type_id"] == "test_plugin_frontend"
         assert metadata["plugin_type"] == PluginType.SERVICE
         assert metadata["plugin_class"] is _PluginClass
+        assert metadata["display_schema"]["title"] == "Test Plugin with Frontend"
+        assert metadata["display_schema"]["panel_variant"] == "iframe"
 
     @pytest.mark.asyncio
     async def test_get_content(self, frontend_plugin):

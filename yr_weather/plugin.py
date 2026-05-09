@@ -1,6 +1,5 @@
 """Yr.no weather service plugin using MET Weather API."""
 
-import hashlib
 from typing import Any
 
 import httpx
@@ -14,7 +13,13 @@ from app.plugins.sdk.service import (
     build_service_plugin_metadata,
     create_service_plugin_instance,
 )
-from app.plugins.utils.config import extract_config_value, to_bool, to_float, to_int, to_str
+from app.plugins.utils.config import (
+    extract_config_value,
+    to_bool,
+    to_float,
+    to_int,
+    to_str,
+)
 from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 # Loguru automatically includes module/function info in logs
@@ -44,16 +49,23 @@ CREATE_FIELDS = (
         "latitude",
         default=59.9139,
         converter=to_float,
-        transform=lambda value: round(float(value), 4) if value is not None else 59.9139,
+        transform=lambda value: round(float(value), 4)
+        if value is not None
+        else 59.9139,
     ),
     ServiceConfigField(
         "longitude",
         default=10.7522,
         converter=to_float,
-        transform=lambda value: round(float(value), 4) if value is not None else 10.7522,
+        transform=lambda value: round(float(value), 4)
+        if value is not None
+        else 10.7522,
     ),
     ServiceConfigField(
-        "altitude", default=0, converter=to_int, transform=lambda value: int(value) if value else 0
+        "altitude",
+        default=0,
+        converter=to_int,
+        transform=lambda value: int(value) if value else 0,
     ),
     ServiceConfigField(
         "forecast_days",
@@ -168,6 +180,7 @@ class YrWeatherServicePlugin(ServicePlugin):
             display_schema={
                 "type": "api",
                 "kind": "weather-forecast",
+                "title": "Weather",
                 "api_endpoint": "/api/plugins/{service_id}/data",
                 "method": "GET",
                 "poll_interval_ms": 600000,
@@ -273,9 +286,13 @@ class YrWeatherServicePlugin(ServicePlugin):
         """Initialize the plugin."""
         # Validate coordinates
         if not (-90 <= self.latitude <= 90):
-            raise ValueError(f"Invalid latitude: {self.latitude} (must be between -90 and 90)")
+            raise ValueError(
+                f"Invalid latitude: {self.latitude} (must be between -90 and 90)"
+            )
         if not (-180 <= self.longitude <= 180):
-            raise ValueError(f"Invalid longitude: {self.longitude} (must be between -180 and 180)")
+            raise ValueError(
+                f"Invalid longitude: {self.longitude} (must be between -180 and 180)"
+            )
 
         # Create HTTP client with required User-Agent header
         # Per Yr.no terms of service, we must identify ourselves
@@ -412,7 +429,9 @@ class YrWeatherServicePlugin(ServicePlugin):
             return "mdi:weather-partly-cloudy"
 
         base_code = (
-            symbol_code.replace("_day", "").replace("_night", "").replace("_polartwilight", "")
+            symbol_code.replace("_day", "")
+            .replace("_night", "")
+            .replace("_polartwilight", "")
         )
         symbol_mapping = {
             "clearsky": "mdi:weather-sunny",
@@ -440,7 +459,9 @@ class YrWeatherServicePlugin(ServicePlugin):
         """Convert symbol code to human-readable description."""
         # Remove time of day suffixes
         base_code = (
-            symbol_code.replace("_day", "").replace("_night", "").replace("_polartwilight", "")
+            symbol_code.replace("_day", "")
+            .replace("_night", "")
+            .replace("_polartwilight", "")
         )
 
         descriptions = {
@@ -518,7 +539,9 @@ class YrWeatherServicePlugin(ServicePlugin):
 
             # Get current weather (first entry in timeseries)
             current_entry = timeseries[0]
-            instant = current_entry.get("data", {}).get("instant", {}).get("details", {})
+            instant = (
+                current_entry.get("data", {}).get("instant", {}).get("details", {})
+            )
             next_1h = current_entry.get("data", {}).get("next_1_hours", {})
             next_6h = current_entry.get("data", {}).get("next_6_hours", {})
 
@@ -538,7 +561,8 @@ class YrWeatherServicePlugin(ServicePlugin):
                     "air_temperature", 0
                 ),  # Yr.no doesn't provide feels_like, use air temp
                 "humidity": instant.get("relative_humidity", 0),
-                "pressure": instant.get("air_pressure_at_sea_level", 0) / 100,  # Convert Pa to hPa
+                "pressure": instant.get("air_pressure_at_sea_level", 0)
+                / 100,  # Convert Pa to hPa
                 "description": self._get_description_from_symbol(symbol_code),
                 "icon": owm_icon,
                 "wind_speed": instant.get("wind_speed", 0),
@@ -547,7 +571,9 @@ class YrWeatherServicePlugin(ServicePlugin):
                 "display": {
                     "icon": mdi_icon,
                     "emoji": _icon_to_emoji(owm_icon),
-                    "temperature_rounded": round(air_temp) if air_temp is not None else None,
+                    "temperature_rounded": round(air_temp)
+                    if air_temp is not None
+                    else None,
                 },
             }
 
@@ -555,7 +581,9 @@ class YrWeatherServicePlugin(ServicePlugin):
             from collections import defaultdict
             from datetime import datetime, timedelta
 
-            forecast_by_date = defaultdict(lambda: {"temps": [], "symbols": [], "descriptions": []})
+            forecast_by_date = defaultdict(
+                lambda: {"temps": [], "symbols": [], "descriptions": []}
+            )
 
             # Process timeseries to group by day
             today = datetime.now().date()
@@ -574,7 +602,9 @@ class YrWeatherServicePlugin(ServicePlugin):
                     continue
 
                 # Get temperature and symbol from available time periods
-                instant_data = entry.get("data", {}).get("instant", {}).get("details", {})
+                instant_data = (
+                    entry.get("data", {}).get("instant", {}).get("details", {})
+                )
                 temp = instant_data.get("air_temperature")
 
                 # Try to get symbol from next_1_hours, next_6_hours, or next_12_hours
@@ -609,13 +639,16 @@ class YrWeatherServicePlugin(ServicePlugin):
                         forecast.append(
                             {
                                 "date": date_str,
-                                "temperature": sum(day_data["temps"]) / len(day_data["temps"]),
+                                "temperature": sum(day_data["temps"])
+                                / len(day_data["temps"]),
                                 "temp_min": min(day_data["temps"]),
                                 "temp_max": max(day_data["temps"]),
                                 "description": day_data["descriptions"][0]
                                 if day_data["descriptions"]
                                 else "unknown",
-                                "icon": self._map_symbol_code_to_icon(day_data["symbols"][0])
+                                "icon": self._map_symbol_code_to_icon(
+                                    day_data["symbols"][0]
+                                )
                                 if day_data["symbols"]
                                 else "01d",
                                 "display": {
@@ -642,7 +675,9 @@ class YrWeatherServicePlugin(ServicePlugin):
             }
 
         except httpx.HTTPStatusError as e:
-            logger.error("HTTP error fetching weather: {} - {}", e.response.status_code, e)
+            logger.error(
+                "HTTP error fetching weather: {} - {}", e.response.status_code, e
+            )
             return {
                 "error": f"HTTP error: {e.response.status_code}",
                 "message": e.response.text if hasattr(e.response, "text") else str(e),
@@ -721,7 +756,9 @@ class YrWeatherServicePlugin(ServicePlugin):
 
             if response.status_code == 200:
                 data = response.json()
-                if data.get("properties") and data.get("properties", {}).get("timeseries"):
+                if data.get("properties") and data.get("properties", {}).get(
+                    "timeseries"
+                ):
                     return {
                         "success": True,
                         "message": f"Successfully connected to Yr.no API. Weather data available for coordinates ({latitude}, {longitude}).",
@@ -773,13 +810,25 @@ class YrWeatherServicePlugin(ServicePlugin):
         if self._client:
             await self._client.aclose()
 
-        latitude = extract_config_value(config, "latitude", default=59.9139, converter=to_float)
-        longitude = extract_config_value(config, "longitude", default=10.7522, converter=to_float)
+        latitude = extract_config_value(
+            config, "latitude", default=59.9139, converter=to_float
+        )
+        longitude = extract_config_value(
+            config, "longitude", default=10.7522, converter=to_float
+        )
         altitude = extract_config_value(config, "altitude", default=0, converter=to_int)
-        forecast_days = extract_config_value(config, "forecast_days", default=5, converter=to_int)
-        location = extract_config_value(config, "location", default=None, converter=to_str)
-        display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
+        forecast_days = extract_config_value(
+            config, "forecast_days", default=5, converter=to_int
+        )
+        location = extract_config_value(
+            config, "location", default=None, converter=to_str
+        )
+        display_order = extract_config_value(
+            config, "display_order", default=0, converter=to_int
+        )
+        fullscreen = extract_config_value(
+            config, "fullscreen", default=False, converter=to_bool
+        )
 
         if latitude is not None:
             self.latitude = round(float(latitude), 4)

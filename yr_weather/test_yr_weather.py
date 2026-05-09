@@ -5,7 +5,7 @@ These tests should be run from the backend directory:
     pytest ../calvin-plugins/yr_weather/test_yr_weather.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +15,6 @@ try:
     from app.plugins.base import PluginType
 
     # Import the plugin
-    import sys
     from pathlib import Path
 
     plugin_path = Path(__file__).parent / "plugin.py"
@@ -29,7 +28,9 @@ try:
             YrWeatherServicePlugin = yr_weather_module.YrWeatherServicePlugin
             handle_plugin_config_update = yr_weather_module.handle_plugin_config_update
         else:
-            pytest.skip("Could not load yr_weather plugin module", allow_module_level=True)
+            pytest.skip(
+                "Could not load yr_weather plugin module", allow_module_level=True
+            )
     else:
         pytest.skip("yr_weather plugin.py not found", allow_module_level=True)
 except ImportError as e:
@@ -67,14 +68,27 @@ class TestYrWeatherServicePlugin:
         assert "latitude" in metadata["instance_config_schema"]
         assert "longitude" in metadata["instance_config_schema"]
         assert metadata["display_schema"]["kind"] == "weather-forecast"
+        assert metadata["display_schema"]["title"] == "Weather"
+        assert metadata["display_schema"]["title_path"] == "$.location"
         assert metadata["display_schema"]["current"]["icon_path"] == "$.display.icon"
 
     def test_symbol_code_to_mdi_icon(self, yr_weather_plugin):
         """Test Yr symbol to host weather icon mapping."""
-        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_day") == "mdi:weather-sunny"
-        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_night") == "mdi:weather-night"
-        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("heavyrain") == "mdi:weather-pouring"
-        assert yr_weather_plugin._map_symbol_code_to_mdi_icon("fog") == "mdi:weather-fog"
+        assert (
+            yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_day")
+            == "mdi:weather-sunny"
+        )
+        assert (
+            yr_weather_plugin._map_symbol_code_to_mdi_icon("clearsky_night")
+            == "mdi:weather-night"
+        )
+        assert (
+            yr_weather_plugin._map_symbol_code_to_mdi_icon("heavyrain")
+            == "mdi:weather-pouring"
+        )
+        assert (
+            yr_weather_plugin._map_symbol_code_to_mdi_icon("fog") == "mdi:weather-fog"
+        )
 
     def test_init(self, yr_weather_plugin):
         """Test plugin initialization."""
