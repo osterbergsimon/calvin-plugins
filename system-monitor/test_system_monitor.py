@@ -58,12 +58,6 @@ class TestSystemMonitorServicePlugin:
         assert metadata["display_schema"]["kind"] == "metric-dashboard"
 
     @pytest.mark.asyncio
-    async def test_get_content(self, system_monitor_plugin):
-        content = await system_monitor_plugin.get_content()
-        assert content["type"] == "system_monitor"
-        assert content["url"] == "/api/plugins/system-monitor-instance/data"
-
-    @pytest.mark.asyncio
     async def test_configure(self, system_monitor_plugin):
         await system_monitor_plugin.configure(
             {

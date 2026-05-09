@@ -244,26 +244,6 @@ class TestMealieServicePlugin:
         # Should not raise an error
 
     @pytest.mark.asyncio
-    async def test_get_content_success(self, mealie_plugin):
-        """Test getting service content successfully."""
-        content = await mealie_plugin.get_content()
-        assert content["type"] == "mealie"
-        assert content["url"] == "/api/plugins/mealie-instance/data"
-        assert content["data"]["mealie_url"] == "http://mealie.local:9000"
-        assert content["data"]["group_id"] is None
-        assert (
-            "api_token" in content["data"]
-        )  # Token is in data but not exposed to frontend
-        assert content["config"]["allowFullscreen"] is True
-
-    @pytest.mark.asyncio
-    async def test_get_content_with_group_id(self, mealie_plugin):
-        """Test getting content with group ID."""
-        mealie_plugin.group_id = "test-group"
-        content = await mealie_plugin.get_content()
-        assert content["data"]["group_id"] == "test-group"
-
-    @pytest.mark.asyncio
     async def test_fetch_meal_plan_success(self, mealie_plugin):
         """Test fetching meal plan successfully."""
         mock_response = MagicMock()

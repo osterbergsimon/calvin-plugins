@@ -308,28 +308,6 @@ class YrWeatherServicePlugin(ServicePlugin):
             await self._client.aclose()
             self._client = None
 
-    async def get_content(self) -> dict[str, Any]:
-        """
-        Get service content for display.
-
-        Returns:
-            Dictionary with content information
-        """
-        weather_api_url = f"/api/plugins/{self.plugin_id}/data"
-
-        return {
-            "type": "weather",
-            "url": weather_api_url,
-            "data": {
-                "latitude": self.latitude,
-                "longitude": self.longitude,
-                "altitude": self.altitude,
-            },
-            "config": {
-                "allowFullscreen": True,
-            },
-        }
-
     def get_config(self) -> dict[str, Any]:
         """
         Get plugin configuration.
