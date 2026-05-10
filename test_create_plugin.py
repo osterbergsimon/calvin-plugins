@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -18,6 +19,7 @@ _validator_spec = importlib.util.spec_from_file_location(
     "validate_plugins", Path(__file__).parent / "scripts" / "validate_plugins.py"
 )
 _validator_mod = importlib.util.module_from_spec(_validator_spec)
+sys.modules[_validator_spec.name] = _validator_mod
 _validator_spec.loader.exec_module(_validator_mod)
 
 
