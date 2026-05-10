@@ -46,6 +46,11 @@ PLUGIN_CLASS_MAP = {
 
 # Types that default to single-instance
 DEFAULT_SINGLE = {"image", "system"}
+DEFAULT_INSTANCE_LABELS = {
+    "service": "Service",
+    "calendar": "Calendar",
+    "backend": "Job",
+}
 
 
 def to_class_name(plugin_id: str) -> str:
@@ -119,7 +124,6 @@ def _protocol_methods(plugin_type: str) -> list[str]:
 
 def generate_plugin_py(plugin_id, name, plugin_type, description, single_instance, instance_label):
     cn = to_class_name(plugin_id) + PLUGIN_CLASS_MAP[plugin_type].replace("Plugin", "")
-    base = PLUGIN_CLASS_MAP[plugin_type]
     tid = to_type_id(plugin_id)
     multi = "False" if single_instance else "True"
 
@@ -461,7 +465,9 @@ def create_plugin(args: argparse.Namespace) -> int:
     description = args.description or f"A {plugin_type} plugin."
     author = args.author or ""
     single_instance = args.single or (plugin_type in DEFAULT_SINGLE)
-    instance_label = args.label
+    instance_label = args.label or (
+        None if single_instance else DEFAULT_INSTANCE_LABELS.get(plugin_type, "Instance")
+    )
 
     target = REPO_ROOT / plugin_id
     if target.exists():
@@ -490,14 +496,15 @@ def create_plugin(args: argparse.Namespace) -> int:
         )
 
     print(f"Created {plugin_id}/")
-    print(f"  plugin.json")
-    print(f"  plugin.py")
+    print("  plugin.json")
+    print("  plugin.py")
     if not args.no_tests:
         print(f"  test_{tid}.py")
     print()
     print("Next steps:")
     print(f"  1. Edit {plugin_id}/plugin.py — fill in instance_config_schema and business logic")
-    print(f"  2. Run:  cd backend && pytest ../{plugin_id}/test_{tid}.py -v")
+    print(f"  2. Run:  python scripts/validate_plugins.py {plugin_id}")
+    print(f"  3. Run:  cd backend && pytest ../{plugin_id}/test_{tid}.py -v")
 
     try:
         subprocess.run(
