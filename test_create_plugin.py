@@ -14,6 +14,12 @@ create_plugin = _mod.create_plugin
 generate_plugin_json = _mod.generate_plugin_json
 generate_plugin_py = _mod.generate_plugin_py
 
+_validator_spec = importlib.util.spec_from_file_location(
+    "validate_plugins", Path(__file__).parent / "scripts" / "validate_plugins.py"
+)
+_validator_mod = importlib.util.module_from_spec(_validator_spec)
+_validator_spec.loader.exec_module(_validator_mod)
+
 
 def test_service_scaffold_uses_service_sdk():
     plugin_py = generate_plugin_py("demo-service", "Demo Service", "service", "Demo", False, None)
@@ -23,6 +29,31 @@ def test_service_scaffold_uses_service_sdk():
     assert "build_service_plugin_metadata(" in plugin_py
     assert "create_service_plugin_instance(" in plugin_py
     assert "build_service_manager_config(" in plugin_py
+
+
+def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monkeypatch):
+    monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
+
+    args = argparse.Namespace(
+        type="service",
+        id="demo-service",
+        name="Demo Service",
+        description="Demo service plugin.",
+        single=False,
+        label=None,
+        author="",
+        no_tests=False,
+    )
+
+    result = create_plugin(args)
+
+    plugin_dir = tmp_path / "demo-service"
+    plugin_py = (plugin_dir / "plugin.py").read_text(encoding="utf-8")
+
+    assert result == 0
+    assert 'instance_label="Service"' in plugin_py
+    assert _validator_mod.validate_plugins([plugin_dir]) == []
 
 
 def test_image_scaffold_uses_image_sdk():
@@ -98,3 +129,25 @@ def test_create_plugin_writes_sdk_first_scaffold(tmp_path, monkeypatch):
     assert '"protocol_version": 1' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
     assert "from app.plugins.sdk.image import (" in plugin_py
     assert 'instance_id="demo_gallery-instance"' in plugin_py
+
+
+def test_create_plugin_prints_validator_next_step(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
+
+    args = argparse.Namespace(
+        type="backend",
+        id="demo-worker",
+        name="Demo Worker",
+        description="Demo worker plugin.",
+        single=False,
+        label=None,
+        author="",
+        no_tests=True,
+    )
+
+    result = create_plugin(args)
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "python scripts/validate_plugins.py demo-worker" in captured.out

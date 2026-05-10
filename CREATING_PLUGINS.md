@@ -24,13 +24,30 @@ python scripts/create_plugin.py backend resize-worker --single
 - `--name NAME` — Human-readable name (default: title-cased id)
 - `--description DESC` — Short description
 - `--single` — Single-instance plugin (default: multi-instance)
-- `--label LABEL` — Instance label shown in UI (e.g. `Location`, `Device`, `Gallery`)
+- `--label LABEL` — Instance label shown in UI (defaults by plugin type for multi-instance plugins)
 - `--author AUTHOR` — Author name
 - `--no-tests` — Skip generating test file
 
-The script creates `<id>/plugin.json`, `<id>/plugin.py`, and `<id>/test_<id>.py`, then automatically rebuilds `plugins.json`.
+The script creates `<id>/plugin.json`, `<id>/plugin.py`, and `<id>/test_<id>.py`, then automatically rebuilds `plugins.json`. Generated plugins are expected to pass `python scripts/validate_plugins.py <id>` before you fill in plugin-specific behavior.
 
 After scaffolding, edit `plugin.py` to fill in `instance_config_schema` and your business logic.
+
+Validate your plugin before installing it:
+
+```bash
+# Validate every plugin listed in plugins.json
+python scripts/validate_plugins.py
+
+# Validate one plugin directory
+python scripts/validate_plugins.py my-plugin
+
+# Validate one plugin implementation file
+python scripts/validate_plugins.py my-plugin/plugin.py
+```
+
+The validator checks package structure, `plugin.json`, metadata schemas, and common
+Calvin contract mistakes. It exits non-zero when validation fails, so it is safe to
+use in CI or pre-PR checks.
 
 ---
 
