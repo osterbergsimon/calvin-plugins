@@ -1,17 +1,11 @@
 """Tests for plugin metadata validation."""
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
+from conftest import load_script
 
-_spec = importlib.util.spec_from_file_location(
-    "validate_plugins", Path(__file__).parent / "scripts" / "validate_plugins.py"
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _mod
-_spec.loader.exec_module(_mod)
+_mod = load_script("validate_plugins")
 
 
 def test_owned_plugins_pass_metadata_validation():

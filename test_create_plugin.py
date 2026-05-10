@@ -1,26 +1,15 @@
 """Tests for plugin scaffolding."""
 
 import argparse
-import importlib.util
-import sys
-from pathlib import Path
 
+from conftest import load_script
 
-_spec = importlib.util.spec_from_file_location(
-    "create_plugin", Path(__file__).parent / "scripts" / "create_plugin.py"
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
+_mod = load_script("create_plugin")
 create_plugin = _mod.create_plugin
 generate_plugin_json = _mod.generate_plugin_json
 generate_plugin_py = _mod.generate_plugin_py
 
-_validator_spec = importlib.util.spec_from_file_location(
-    "validate_plugins", Path(__file__).parent / "scripts" / "validate_plugins.py"
-)
-_validator_mod = importlib.util.module_from_spec(_validator_spec)
-sys.modules[_validator_spec.name] = _validator_mod
-_validator_spec.loader.exec_module(_validator_mod)
+_validator_mod = load_script("validate_plugins")
 
 
 def test_service_scaffold_uses_service_sdk():

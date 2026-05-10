@@ -465,7 +465,9 @@ def create_plugin(args: argparse.Namespace) -> int:
     description = args.description or f"A {plugin_type} plugin."
     author = args.author or ""
     single_instance = args.single or (plugin_type in DEFAULT_SINGLE)
-    instance_label = args.label or (None if single_instance else DEFAULT_INSTANCE_LABELS[plugin_type])
+    instance_label = args.label or (
+        None if single_instance else DEFAULT_INSTANCE_LABELS.get(plugin_type, "Instance")
+    )
 
     target = REPO_ROOT / plugin_id
     if target.exists():
