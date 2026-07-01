@@ -1,19 +1,20 @@
-"""Immich self-hosted photo library image plugin."""
+"""Immich self-hosted photo library image plugin (plugin contract 1.0).
 
+One declarative class: config is declared once in
+`metadata.instance_config_schema`, the loader discovers the class, and the
+gallery plumbing (auth headers, URL building, protected fetches) comes from
+`SelfHostedGalleryImagePlugin`.
+"""
+
+import random
 from datetime import datetime
 from typing import Any
 
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.sdk.image import SelfHostedGalleryImagePlugin
-from app.plugins.utils.config import extract_config_value, to_int, to_str
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
-)
 from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _SCAN_INTERVAL = 3600  # Refresh once per hour
@@ -26,75 +27,83 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
     api_base_path = "/api"
     auth_header_name = "x-api-key"
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        return {
-            "type_id": "immich",
-            "plugin_type": PluginType.IMAGE,
-            "name": "Immich",
-            "description": "Photos from your self-hosted Immich photo library",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,
-            "instance_label": "Gallery",
-            "common_config_schema": {},
-            "instance_config_schema": {
-                "url": {
-                    "type": "string",
-                    "description": "Base URL of your Immich instance (e.g. https://photos.example.com)",
-                    "default": "",
-                    "ui": {
-                        "component": "text",
-                        "placeholder": "https://photos.example.com",
-                        "validation": {"required": True},
-                    },
-                },
-                "api_key": {
-                    "type": "password",
-                    "description": "Immich API key (Profile → API Keys)",
-                    "default": "",
-                    "ui": {
-                        "component": "password",
-                        "placeholder": "Enter your Immich API key",
-                        "validation": {"required": True},
-                    },
-                },
-                "album_id": {
-                    "type": "string",
-                    "description": "Album ID to source photos from (leave blank for random photos from the whole library)",
-                    "default": "",
-                    "ui": {
-                        "component": "text",
-                        "placeholder": "Leave blank for random from library",
-                    },
-                },
-                "count": {
-                    "type": "string",
-                    "description": "Number of photos to fetch",
-                    "default": "30",
-                    "ui": {
-                        "component": "number",
-                        "min": 1,
-                        "max": 200,
-                        "placeholder": "30",
-                    },
+    metadata = PluginMetadata(
+        type_id="immich",
+        name="Immich",
+        description="Photos from your self-hosted Immich photo library",
+        default_instance_name="Immich",
+        instance_label="Gallery",
+        # Same Immich server -> same instance
+        instance_identity=["url"],
+        instance_config_schema={
+            "url": {
+                "type": "string",
+                "description": "Base URL of your Immich instance (e.g. https://photos.example.com)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "https://photos.example.com",
+                    "validation": {"required": True, "type": "url"},
                 },
             },
-            "plugin_class": cls,
-        }
+            "api_key": {
+                "type": "password",
+                "description": "Immich API key (Profile → API Keys)",
+                "default": "",
+                "ui": {
+                    "component": "password",
+                    "placeholder": "Enter your Immich API key",
+                    "validation": {"required": True},
+                },
+            },
+            "album_id": {
+                "type": "string",
+                "description": "Album ID to source photos from (leave blank for random photos from the whole library)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "Leave blank for random from library",
+                },
+            },
+            "count": {
+                "type": "integer",
+                "description": "Number of photos to fetch",
+                "default": 30,
+                "ui": {
+                    "component": "number",
+                    "placeholder": "30",
+                    "validation": {"min": 1, "max": 200},
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "instance",
+            },
+            {
+                "id": "test",
+                "type": "test",
+                "label": "Test Connection",
+                "style": "secondary",
+                "scope": "instance",
+            },
+        ],
+    )
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        url: str = "",
-        api_key: str = "",
-        album_id: str = "",
-        count: int = 30,
-        enabled: bool = True,
-    ):
-        super().__init__(plugin_id, name, url=url, api_key=api_key, enabled=enabled)
-        self.album_id = album_id
-        self.count = count
+    # Config accessors — base_url and api_key come from the gallery SDK base;
+    # these cover the Immich-specific fields.
+
+    @property
+    def album_id(self) -> str:
+        return str(self.config.get("album_id") or "").strip()
+
+    @property
+    def count(self) -> int:
+        return int(self.config.get("count") or 30)
 
     async def initialize(self) -> None:
         cached_images, cached_time = load_scan_cache(self.plugin_id)
@@ -103,8 +112,42 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
             self._last_scan = cached_time
         await self.scan_images()
 
-    async def cleanup(self) -> None:
-        pass
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration and force a rescan on next access."""
+        await super().configure(config)
+        self._last_scan = None
+
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require url + api_key (schema) and an http(s) URL scheme."""
+        if not await super().validate_config(config):
+            return False
+        normalized = cls.normalize_config(config)
+        url = str(normalized.get("url") or "").strip()
+        return url.startswith(("http://", "https://"))
+
+    @classmethod
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Ping the Immich server with the configured API key."""
+        normalized = cls.normalize_config(config)
+        url = str(normalized.get("url") or "").rstrip("/")
+        api_key = str(normalized.get("api_key") or "").strip()
+        if not url or not api_key:
+            return {"success": False, "message": "Immich URL and API key are required"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{url}/api/server/ping",
+                    headers=cls.build_auth_headers(api_key),
+                )
+            if response.status_code == 200:
+                return {"success": True, "message": "Connected to Immich successfully."}
+            return {
+                "success": False,
+                "message": f"Immich returned HTTP {response.status_code}. Check the URL and API key.",
+            }
+        except httpx.HTTPError as e:
+            return {"success": False, "message": f"Could not connect to {url}: {e}"}
 
     async def get_images(self) -> list[dict[str, Any]]:
         await self.scan_images()
@@ -155,7 +198,6 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
                 data = response.json()
                 assets = data.get("assets", [])
                 # Shuffle and limit
-                import random
                 random.shuffle(assets)
                 return assets[: self.count]
             else:
@@ -171,7 +213,6 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
     def _to_image_metadata(self, asset: dict[str, Any]) -> dict[str, Any]:
         asset_id = asset.get("id", "")
         exif = asset.get("exifInfo") or {}
-        thumbhash = asset.get("thumbhash", "")
         return {
             "id": f"immich-{asset_id}",
             "filename": asset.get("originalFileName", asset_id),
@@ -187,82 +228,3 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
             "photographer": exif.get("make", ""),
             "date": asset.get("fileCreatedAt", ""),
         }
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        url = extract_config_value(config, "url", default="", converter=to_str).rstrip("/")
-        api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-        if not url or not api_key:
-            return False
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"{url}/api/server/ping",
-                    headers=self.build_auth_headers(api_key),
-                )
-                return response.status_code == 200
-        except httpx.HTTPError:
-            return False
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        await super().configure(config)
-        self.base_url = extract_config_value(config, "url", default="", converter=to_str).rstrip("/")
-        self.api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-        self.album_id = extract_config_value(config, "album_id", default="", converter=to_str)
-        self.count = extract_config_value(config, "count", default=30, converter=to_int)
-        self._last_scan = None
-
-
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    return [ImmichImagePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> ImmichImagePlugin | None:
-    if type_id != "immich":
-        return None
-    return ImmichImagePlugin(
-        plugin_id=plugin_id,
-        name=name,
-        url=extract_config_value(config, "url", default="", converter=to_str),
-        api_key=extract_config_value(config, "api_key", default="", converter=to_str),
-        album_id=extract_config_value(config, "album_id", default="", converter=to_str),
-        count=extract_config_value(config, "count", default=30, converter=to_int),
-        enabled=config.get("enabled", False),
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    if type_id != "immich":
-        return None
-
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "url": extract_config_value(c, "url", default="", converter=to_str),
-            "api_key": extract_config_value(c, "api_key", default="", converter=to_str),
-            "album_id": extract_config_value(c, "album_id", default="", converter=to_str),
-            "count": extract_config_value(c, "count", default=30, converter=to_int),
-        }
-
-    manager_config = InstanceManagerConfig(
-        type_id="immich",
-        single_instance=False,
-        normalize_config=normalize_config,
-        default_instance_name="Immich",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

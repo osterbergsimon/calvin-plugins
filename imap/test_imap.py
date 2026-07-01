@@ -1,342 +1,321 @@
-"""Tests for IMAP plugin.
+"""Tests for the IMAP plugin (plugin contract 1.0).
 
-These tests should be run from the backend directory:
-    cd backend
-    pytest ../calvin-plugins/imap/test_imap.py
+Run from the calvin backend directory so `app.*` imports resolve:
+    cd calvin/backend
+    uv run pytest ../../calvin-plugins/imap/test_imap.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import imaplib
+import importlib.util
+import types
+from email.message import EmailMessage
 from pathlib import Path
-import tempfile
-import os
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Note: These tests assume the plugin is installed and the backend imports are available
-# In a real scenario, you'd run these tests in the calvin backend context
 try:
-    from app.plugins.base import PluginType
-    from app.plugins.hooks import hookimpl
+    from app.plugins.definitions import PluginMetadata
+    from app.plugins.loader import PluginLoader
     from app.plugins.protocols import BackendPlugin
-    from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
-    from app.plugins.utils.instance_manager import (
-        InstanceManagerConfig,
-        handle_plugin_config_update_generic,
-    )
-
-    # Import the plugin
-    import sys
-    from pathlib import Path
-
-    plugin_path = Path(__file__).parent / "plugin.py"
-    if plugin_path.exists():
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("imap_plugin", plugin_path)
-        if spec and spec.loader:
-            imap_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(imap_module)
-            ImapBackendPlugin = imap_module.ImapBackendPlugin
-        else:
-            pytest.skip("Could not load imap plugin module", allow_module_level=True)
-    else:
-        pytest.skip("imap plugin.py not found", allow_module_level=True)
-except ImportError as e:
+except ImportError as e:  # pragma: no cover
     pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
+def _load_plugin_module():
+    plugin_path = Path(__file__).parent / "plugin.py"
+    spec = importlib.util.spec_from_file_location("imap_plugin_under_test", plugin_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+imap_module = _load_plugin_module()
+ImapBackendPlugin = imap_module.ImapBackendPlugin
+
+
 @pytest.fixture
-def imap_plugin():
-    """Create an ImapBackendPlugin instance."""
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # Set IMAGE_DIR env var for test
-        os.environ["IMAGE_DIR"] = tmp_dir
+async def plugin(tmp_path):
+    """A configured plugin instance saving into a temp directory."""
+    instance = ImapBackendPlugin(plugin_id="imap-test", name="Email (IMAP)", enabled=True)
+    await instance.configure(
+        {
+            "email_address": " test@example.com ",
+            "email_password": "test-password",
+            "imap_server": "imap.gmail.com",
+            "imap_port": "993",
+            "check_interval": "300",
+            "target_directory": str(tmp_path),
+            "mark_as_read": "true",
+        }
+    )
+    return instance
 
-        plugin = ImapBackendPlugin(
-            plugin_id="imap-instance",
-            name="Email (IMAP)",
-            email_address="test@example.com",
-            email_password="test-password",
-            imap_server="imap.gmail.com",
-            imap_port=993,
-            target_directory=None,
-            check_interval=300,
-            mark_as_read=True,
-            enabled=True,
+
+def _email_with_attachment(filename: str, payload: bytes = b"fake image data") -> EmailMessage:
+    message = EmailMessage()
+    message["Subject"] = "Photos"
+    message.set_content("see attachment")
+    message.add_attachment(
+        payload, maintype="image", subtype="png", filename=filename
+    )
+    return message
+
+
+class TestContractShape:
+    """The plugin conforms to contract 1.0: one class, declarative metadata."""
+
+    def test_discoverable_by_loader(self):
+        loader = PluginLoader()
+        module = types.ModuleType("installed_plugin_imap")
+        module.ImapBackendPlugin = ImapBackendPlugin
+        assert loader.register_module(module) == ["imap"]
+
+    def test_no_module_level_hooks(self):
+        for hook in (
+            "register_plugin_types",
+            "create_plugin_instance",
+            "handle_plugin_config_update",
+        ):
+            assert not hasattr(imap_module, hook), hook
+
+    def test_metadata(self):
+        md = ImapBackendPlugin.metadata
+        assert isinstance(md, PluginMetadata)
+        assert md.type_id == "imap"
+        assert md.supports_multiple_instances is True
+        assert md.fixed_instance_id is None
+        assert md.instance_identity == ["email_address", "imap_server"]
+        assert md.display_schema is None  # backend plugin: no panel
+        action_types = {action["type"] for action in md.ui_actions}
+        assert {"save", "test", "fetch"} <= action_types
+        required = {
+            key
+            for key, field in md.instance_config_schema.items()
+            if (field.get("ui") or {}).get("validation", {}).get("required")
+        }
+        assert required == {"email_address", "email_password"}
+
+    def test_is_backend_plugin(self):
+        assert issubclass(ImapBackendPlugin, BackendPlugin)
+
+
+class TestConfig:
+    async def test_config_normalization_and_accessors(self, plugin, tmp_path):
+        assert plugin.email_address == "test@example.com"  # whitespace trimmed
+        assert plugin.email_password == "test-password"
+        assert plugin.imap_server == "imap.gmail.com"
+        assert plugin.imap_port == 993  # "993" converted by schema type
+        assert plugin.check_interval == 300
+        assert plugin.mark_as_read is True  # "true" converted by schema type
+        assert plugin.target_directory == tmp_path.resolve()
+        assert plugin.target_directory.exists()
+
+    async def test_mark_as_read_string_false(self, plugin, tmp_path):
+        await plugin.configure(
+            {
+                "email_address": "test@example.com",
+                "email_password": "test-password",
+                "target_directory": str(tmp_path),
+                "mark_as_read": "false",
+            }
         )
-        yield plugin
+        assert plugin.mark_as_read is False
 
-        # Cleanup
-        if "IMAGE_DIR" in os.environ:
-            del os.environ["IMAGE_DIR"]
+    async def test_target_directory_defaults_to_image_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("IMAGE_DIR", str(tmp_path / "images"))
+        instance = ImapBackendPlugin("imap-x", "Email (IMAP)")
+        assert instance.target_directory == (tmp_path / "images").resolve()
 
+    async def test_validate_config(self):
+        good = {"email_address": "test@example.com", "email_password": "secret"}
+        assert await ImapBackendPlugin.validate_config(good) is True
+        assert await ImapBackendPlugin.validate_config({**good, "email_address": ""}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "email_password": " "}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "imap_port": 0}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "imap_port": 65536}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "check_interval": 30}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "check_interval": 5000}) is False
+        assert await ImapBackendPlugin.validate_config({**good, "imap_port": 143}) is True
 
-class TestImapBackendPlugin:
-    """Tests for ImapBackendPlugin class."""
-
-    def test_get_plugin_metadata(self):
-        """Test plugin metadata."""
-        metadata = ImapBackendPlugin.get_plugin_metadata()
-        assert metadata["type_id"] == "imap"
-        assert metadata["plugin_type"] == PluginType.BACKEND
-        assert metadata["name"] == "Email (IMAP)"
-        assert metadata["supports_multiple_instances"] is True
-        assert "common_config_schema" in metadata
-        assert "instance_config_schema" in metadata
-        assert "email_address" in metadata["instance_config_schema"]
-        assert "email_password" in metadata["instance_config_schema"]
-        assert "imap_server" in metadata["instance_config_schema"]
-        assert "imap_port" in metadata["instance_config_schema"]
-
-    def test_init(self, imap_plugin):
-        """Test plugin initialization."""
-        assert imap_plugin.plugin_id == "imap-instance"
-        assert imap_plugin.name == "Email (IMAP)"
-        assert imap_plugin.email_address == "test@example.com"
-        assert imap_plugin.email_password == "test-password"
-        assert imap_plugin.imap_server == "imap.gmail.com"
-        assert imap_plugin.imap_port == 993
-        assert imap_plugin.check_interval == 300
-        assert imap_plugin.mark_as_read is True
-        assert imap_plugin.enabled is True
-        assert imap_plugin.target_directory.exists()
-
-    def test_init_with_custom_target_directory(self):
-        """Test plugin initialization with custom target directory."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            plugin = ImapBackendPlugin(
-                plugin_id="imap-instance",
-                name="Email (IMAP)",
-                email_address="test@example.com",
-                email_password="test-password",
-                target_directory=tmp_dir,
-            )
-            assert plugin.target_directory == Path(tmp_dir).resolve()
-            assert plugin.target_directory.exists()
-
-    @pytest.mark.asyncio
-    async def test_initialize(self, imap_plugin):
-        """Test plugin initialization."""
-        await imap_plugin.initialize()
-        # Should not raise any errors
-
-    @pytest.mark.asyncio
-    async def test_cleanup(self, imap_plugin):
-        """Test plugin cleanup."""
-        await imap_plugin.cleanup()
-        # Should not raise any errors
-
-    @pytest.mark.asyncio
-    async def test_validate_config_valid(self, imap_plugin):
-        """Test config validation with valid config."""
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                }
-            )
-            is True
+    def test_instance_identity_stable_per_account_and_server(self):
+        config = {"email_address": "a@example.com", "imap_server": "imap.gmail.com"}
+        assert ImapBackendPlugin.instance_id_for(config) == ImapBackendPlugin.instance_id_for(
+            {**config, "email_password": "different"}
         )
-
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "imap_server": "imap.outlook.com",
-                    "imap_port": 143,
-                    "check_interval": 600,
-                }
-            )
-            is True
+        assert ImapBackendPlugin.instance_id_for(config) != ImapBackendPlugin.instance_id_for(
+            {**config, "email_address": "b@example.com"}
         )
-
-    @pytest.mark.asyncio
-    async def test_validate_config_missing_email(self, imap_plugin):
-        """Test config validation with missing email address."""
-        assert await imap_plugin.validate_config({"email_password": "test-password"}) is False
-        assert (
-            await imap_plugin.validate_config(
-                {"email_address": "", "email_password": "test-password"}
-            )
-            is False
+        assert ImapBackendPlugin.instance_id_for(config) != ImapBackendPlugin.instance_id_for(
+            {**config, "imap_server": "imap.other.com"}
         )
 
-    @pytest.mark.asyncio
-    async def test_validate_config_missing_password(self, imap_plugin):
-        """Test config validation with missing password."""
-        assert await imap_plugin.validate_config({"email_address": "test@example.com"}) is False
-        assert (
-            await imap_plugin.validate_config(
-                {"email_address": "test@example.com", "email_password": ""}
-            )
-            is False
+
+class TestScheduling:
+    """Scheduled-task behavior is preserved exactly."""
+
+    async def test_schedule_config_uses_check_interval(self, plugin, tmp_path):
+        await plugin.configure(
+            {
+                "email_address": "test@example.com",
+                "email_password": "test-password",
+                "target_directory": str(tmp_path),
+                "check_interval": 600,
+            }
         )
+        schedule = await plugin.get_schedule_config()
+        assert schedule == {"interval": 600, "enabled": True, "max_concurrent": 1}
 
-    @pytest.mark.asyncio
-    async def test_validate_config_invalid_port(self, imap_plugin):
-        """Test config validation with invalid port."""
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "imap_port": 0,
-                }
-            )
-            is False
+    async def test_schedule_config_none_when_disabled(self, plugin):
+        plugin.disable()
+        assert await plugin.get_schedule_config() is None
+
+    async def test_run_scheduled_task_reports_downloads(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            plugin,
+            "_check_emails_sync",
+            lambda: {"success": True, "message": "ok", "images_downloaded": 2},
         )
+        result = await plugin.run_scheduled_task()
+        assert result["success"] is True
+        assert result["data"]["images_downloaded"] == 2
+        assert "2 image(s)" in result["message"]
 
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "imap_port": 65536,
-                }
-            )
-            is False
+    async def test_run_scheduled_task_reports_failure(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            plugin,
+            "_check_emails_sync",
+            lambda: {"success": False, "message": "boom", "images_downloaded": 0},
         )
+        result = await plugin.run_scheduled_task()
+        assert result["success"] is False
+        assert result["message"] == "boom"
 
-    @pytest.mark.asyncio
-    async def test_validate_config_invalid_check_interval(self, imap_plugin):
-        """Test config validation with invalid check interval."""
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "check_interval": 30,  # Too small
-                }
-            )
-            is False
+    async def test_configure_reregisters_schedule_on_interval_change(
+        self, plugin, tmp_path, monkeypatch
+    ):
+        import app.services.backend_scheduler as scheduler_module
+
+        scheduler = MagicMock()
+        scheduler.scheduler.running = True
+        scheduler.unregister_plugin_tasks = AsyncMock()
+        scheduler.register_plugin_tasks = AsyncMock()
+        monkeypatch.setattr(scheduler_module, "backend_plugin_scheduler", scheduler)
+
+        plugin.start()
+        await plugin.configure(
+            {
+                "email_address": "test@example.com",
+                "email_password": "test-password",
+                "target_directory": str(tmp_path),
+                "check_interval": 900,
+            }
         )
+        scheduler.unregister_plugin_tasks.assert_awaited_once_with("imap-test")
+        scheduler.register_plugin_tasks.assert_awaited_once_with(plugin)
 
-        assert (
-            await imap_plugin.validate_config(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "check_interval": 5000,  # Too large
-                }
-            )
-            is False
+
+class TestCheckMail:
+    """Email checking against a mocked IMAP client."""
+
+    def _mail_mock(self, message: EmailMessage):
+        mail = MagicMock()
+        mail.search.return_value = ("OK", [b"1"])
+        mail.fetch.return_value = ("OK", [(b"1 (RFC822)", message.as_bytes())])
+        return mail
+
+    async def test_check_downloads_attachment_and_marks_read(
+        self, plugin, tmp_path, monkeypatch
+    ):
+        mail = self._mail_mock(_email_with_attachment("photo.png"))
+        monkeypatch.setattr(imaplib, "IMAP4_SSL", MagicMock(return_value=mail))
+
+        result = plugin._check_emails_sync()
+
+        assert result["success"] is True
+        assert result["images_downloaded"] == 1
+        assert (tmp_path / "photo.png").read_bytes() == b"fake image data"
+        mail.login.assert_called_once_with("test@example.com", "test-password")
+        mail.store.assert_called_once_with(b"1", "+FLAGS", "\\Seen")
+        mail.logout.assert_called_once()
+
+    async def test_check_skips_unsupported_attachment(self, plugin, tmp_path, monkeypatch):
+        mail = self._mail_mock(_email_with_attachment("notes.txt"))
+        monkeypatch.setattr(imaplib, "IMAP4_SSL", MagicMock(return_value=mail))
+
+        result = plugin._check_emails_sync()
+
+        assert result["success"] is True
+        assert result["images_downloaded"] == 0
+        assert not (tmp_path / "notes.txt").exists()
+        mail.store.assert_not_called()
+
+    async def test_check_reports_auth_failure(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            imaplib,
+            "IMAP4_SSL",
+            MagicMock(side_effect=imaplib.IMAP4.error("Authentication failed")),
         )
+        result = plugin._check_emails_sync()
+        assert result["success"] is False
+        assert "authentication failed" in result["message"].lower()
 
-    @pytest.mark.asyncio
-    async def test_configure(self, imap_plugin):
-        """Test plugin configuration."""
-        with patch.object(imap_plugin, "is_running", return_value=False):
-            await imap_plugin.configure(
-                {
-                    "email_address": "new@example.com",
-                    "email_password": "new-password",
-                    "imap_server": "imap.outlook.com",
-                    "imap_port": 143,
-                    "check_interval": 600,
-                    "mark_as_read": False,
+    async def test_avoids_overwriting_existing_files(self, plugin, tmp_path):
+        (tmp_path / "photo.png").write_bytes(b"existing")
+        downloaded = plugin._extract_images(_email_with_attachment("photo.png"))
+        assert downloaded == 1
+        assert (tmp_path / "photo.png").read_bytes() == b"existing"
+        assert (tmp_path / "photo_1.png").read_bytes() == b"fake image data"
+
+
+class TestFetch:
+    """Instance-level fetch() replaces the retired class-level fetch verb."""
+
+    async def test_fetch_runs_check_and_shapes_result(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            plugin,
+            "run_scheduled_task",
+            AsyncMock(
+                return_value={
+                    "success": True,
+                    "message": "Downloaded 3 image(s) from email",
+                    "data": {"images_downloaded": 3},
                 }
-            )
+            ),
+        )
+        result = await plugin.fetch()
+        assert result == {
+            "success": True,
+            "message": "Downloaded 3 image(s) from email",
+            "images_downloaded": 3,
+        }
 
-            assert imap_plugin.email_address == "new@example.com"
-            assert imap_plugin.email_password == "new-password"
-            assert imap_plugin.imap_server == "imap.outlook.com"
-            assert imap_plugin.imap_port == 143
-            assert imap_plugin.check_interval == 600
-            assert imap_plugin.mark_as_read is False
 
-    @pytest.mark.asyncio
-    async def test_configure_target_directory(self, imap_plugin):
-        """Test configuring with custom target directory."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            with patch.object(imap_plugin, "is_running", return_value=False):
-                await imap_plugin.configure(
-                    {
-                        "email_address": "test@example.com",
-                        "email_password": "test-password",
-                        "target_directory": tmp_dir,
-                    }
-                )
-
-                assert imap_plugin.target_directory == Path(tmp_dir).resolve()
-                assert imap_plugin.target_directory.exists()
-
-    @pytest.mark.asyncio
-    async def test_configure_mark_as_read_string(self, imap_plugin):
-        """Test configuring mark_as_read with string value."""
-        with patch.object(imap_plugin, "is_running", return_value=False):
-            await imap_plugin.configure(
-                {
-                    "email_address": "test@example.com",
-                    "email_password": "test-password",
-                    "mark_as_read": "false",
-                }
-            )
-
-            assert imap_plugin.mark_as_read is False
-
-            await imap_plugin.configure(
-                {
-                    "mark_as_read": "true",
-                }
-            )
-
-            assert imap_plugin.mark_as_read is True
-
-    @pytest.mark.asyncio
-    async def test_configure_partial_update(self, imap_plugin):
-        """Test configuring with partial config."""
-        original_email = imap_plugin.email_address
-
-        with patch.object(imap_plugin, "is_running", return_value=False):
-            await imap_plugin.configure({"check_interval": 600})
-
-            # Email should remain unchanged
-            assert imap_plugin.email_address == original_email
-            assert imap_plugin.check_interval == 600
-
-    @pytest.mark.asyncio
-    async def test_test_type_config_missing_credentials(self):
-        result = await ImapBackendPlugin.test_type_config({})
+class TestConnectionTest:
+    async def test_missing_config_fails_fast(self):
+        result = await ImapBackendPlugin.test_connection({})
         assert result["success"] is False
         assert "required" in result["message"].lower()
 
-    @pytest.mark.asyncio
-    async def test_fetch_type_data_not_found(self):
-        from app.models.db_models import PluginDB
-
-        with patch.object(type(PluginDB.objects), "filter") as filter_mock:
-            filter_mock.return_value.all = AsyncMock(return_value=[])
-            result = await ImapBackendPlugin.fetch_type_data()
-
-        assert result["success"] is False
-        assert result["images_downloaded"] == 0
-
-
-@pytest.mark.asyncio
-class TestImapPluginHooks:
-    """Tests for IMAP plugin hooks."""
-
-    async def test_create_plugin_instance(self):
-        """Test create_plugin_instance hook."""
-        # This would need to be tested in the actual backend context
-        # with proper plugin loading
-        pass
-
-    async def test_handle_plugin_config_update(self):
-        """Test handle_plugin_config_update hook.
-
-        Note: This test is skipped when run from the plugin directory because it requires
-        the `test_db` fixture which is only available in the backend test suite.
-
-        To test handle_plugin_config_update hooks, run the backend test suite from the
-        backend directory:
-            cd backend
-            pytest tests/unit/test_plugin_hooks.py
-        """
-        pytest.skip(
-            "Requires backend test fixtures (test_db). "
-            "Run from backend directory: "
-            "cd backend && pytest tests/unit/test_plugin_hooks.py"
+    async def test_successful_connection(self, monkeypatch):
+        mail = MagicMock()
+        ssl_factory = MagicMock(return_value=mail)
+        monkeypatch.setattr(imaplib, "IMAP4_SSL", ssl_factory)
+        result = await ImapBackendPlugin.test_connection(
+            {"email_address": "test@example.com", "email_password": "secret"}
         )
+        assert result["success"] is True
+        ssl_factory.assert_called_once_with("imap.gmail.com", 993)
+        mail.login.assert_called_once_with("test@example.com", "secret")
+
+    async def test_auth_failure_reported(self, monkeypatch):
+        monkeypatch.setattr(
+            imaplib,
+            "IMAP4_SSL",
+            MagicMock(side_effect=imaplib.IMAP4.error("invalid credentials")),
+        )
+        result = await ImapBackendPlugin.test_connection(
+            {"email_address": "test@example.com", "email_password": "wrong"}
+        )
+        assert result["success"] is False
+        assert "authentication failed" in result["message"].lower()

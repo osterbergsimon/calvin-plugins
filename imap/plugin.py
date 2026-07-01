@@ -1,258 +1,253 @@
-"""IMAP email backend plugin - downloads images from email attachments."""
+"""IMAP email backend plugin - downloads images from email attachments.
+
+Plugin contract 1.0: one declarative class, config declared once in
+`metadata.instance_config_schema`, `test_connection()` as the classmethod
+test verb, and instance-level `fetch()` as the on-demand "check mail now"
+verb (the host's POST /plugins/imap/fetch route calls it on each enabled
+instance). Scheduled checking runs through `get_schedule_config()` /
+`run_scheduled_task()` exactly as before.
+"""
 
 import asyncio
 import email
-import hashlib
 import imaplib
 import os
-import time
 from email.header import decode_header
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from app.plugins.base import PluginType
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import BackendPlugin
-from app.plugins.sdk.backend import (
-    BackendConfigField,
-    build_backend_manager_config,
-    build_backend_plugin_metadata,
-    create_backend_plugin_instance,
-    path_or_none,
-)
-from app.plugins.utils.config import extract_config_value, to_int, to_str, to_bool
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
-
-# Loguru automatically includes module/function info in logs
-
-
-BACKEND_FIELDS = (
-    BackendConfigField(
-        "email_address",
-        default="",
-        converter=to_str,
-        transform=lambda value: value.strip() if value else "",
-    ),
-    BackendConfigField(
-        "email_password",
-        default="",
-        converter=to_str,
-        transform=lambda value: value.strip() if value else "",
-    ),
-    BackendConfigField(
-        "imap_server",
-        default="imap.gmail.com",
-        converter=to_str,
-        transform=lambda value: value.strip() if value else "imap.gmail.com",
-    ),
-    BackendConfigField("imap_port", default=993, converter=to_int),
-    BackendConfigField("check_interval", default=300, converter=to_int),
-    BackendConfigField(
-        "target_directory",
-        default="",
-        converter=to_str,
-        transform=path_or_none,
-        arg_name="target_directory",
-    ),
-    BackendConfigField(
-        "mark_as_read",
-        default=True,
-        converter=to_bool,
-        transform=lambda value: value.lower() in ("true", "1", "yes")
-        if isinstance(value, str)
-        else bool(value),
-    ),
-)
 
 
 class ImapBackendPlugin(BackendPlugin):
     """IMAP email backend plugin for downloading images from email attachments.
 
-    This plugin downloads images from email attachments to the local images directory,
-    where they can be served by the LocalImagePlugin. It does not implement image
-    serving/viewing functionality itself.
+    This plugin downloads images from email attachments to the local images
+    directory, where they can be served by the LocalImagePlugin. It does not
+    implement image serving/viewing functionality itself.
     """
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return build_backend_plugin_metadata(
-            type_id="imap",
-            name="Email (IMAP)",
-            description="Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share → Email.",  # noqa: E501
-            plugin_class=cls,
-            supports_multiple_instances=True,
-            instance_label="Email Account",
-            common_config_schema={},
-            instance_config_schema={
-                "email_address": {
-                    "type": "string",
-                    "description": "Email address to check for images",
-                    "default": "",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "your.email@example.com",
-                        "validation": {
-                            "required": True,
-                            "type": "email",
-                        },
-                    },
-                },
-                "email_password": {
-                    "type": "password",
-                    "description": "Email password or app-specific password (for Gmail, use App Password)",  # noqa: E501
-                    "default": "",
-                    "ui": {
-                        "component": "password",
-                        "placeholder": "Enter password or App Password",
-                        "help_text": "For Gmail, use an App Password instead of your regular password",  # noqa: E501
-                        "validation": {
-                            "required": True,
-                        },
-                    },
-                },
-                "imap_server": {
-                    "type": "string",
-                    "description": "IMAP server address (e.g., imap.gmail.com, imap-mail.outlook.com)",  # noqa: E501
-                    "default": "imap.gmail.com",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "imap.gmail.com",
-                    },
-                },
-                "imap_port": {
-                    "type": "string",
-                    "description": "IMAP server port (usually 993 for SSL)",
-                    "default": "993",
-                    "ui": {
-                        "component": "number",
-                        "min": 1,
-                        "max": 65535,
-                        "placeholder": "993",
-                    },
-                },
-                "check_interval": {
-                    "type": "string",
-                    "description": "How often to check for new emails (seconds, default: 300 = 5 minutes)",  # noqa: E501
-                    "default": "300",
-                    "ui": {
-                        "component": "number",
-                        "min": 60,
-                        "max": 3600,
-                        "placeholder": "300",
-                        "help_text": "How often to check for new emails (60-3600 seconds)",
-                    },
-                },
-                "target_directory": {
-                    "type": "string",
-                    "description": "Directory to save downloaded images (defaults to local images directory)",  # noqa: E501
-                    "default": "",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "./data/images (default)",
-                        "help_text": "Leave empty to use the local images directory",
-                    },
-                },
-                "mark_as_read": {
-                    "type": "string",
-                    "description": "Mark processed emails as read (true/false, default: true)",
-                    "default": "true",
-                    "ui": {
-                        "component": "select",
-                        "options": [
-                            {"value": "true", "label": "Yes"},
-                            {"value": "false", "label": "No"},
-                        ],
+    metadata = PluginMetadata(
+        type_id="imap",
+        name="Email (IMAP)",
+        description=(
+            "Download images from email attachments. Works with Gmail, Outlook, "
+            "and any IMAP provider. Share photos from Android using Share → Email."
+        ),
+        default_instance_name="IMAP Email",
+        instance_label="Email Account",
+        # Same account on the same server -> same instance
+        instance_identity=["email_address", "imap_server"],
+        instance_config_schema={
+            "email_address": {
+                "type": "string",
+                "description": "Email address to check for images",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "your.email@example.com",
+                    "validation": {
+                        "required": True,
+                        "type": "email",
                     },
                 },
             },
-            ui_actions=[
-                {
-                    "id": "save",
-                    "type": "save",
-                    "label": "Save Settings",
-                    "style": "primary",
-                    "scope": "instance",
+            "email_password": {
+                "type": "password",
+                "description": (
+                    "Email password or app-specific password (for Gmail, use App Password)"
+                ),
+                "default": "",
+                "ui": {
+                    "component": "password",
+                    "placeholder": "Enter password or App Password",
+                    "help_text": (
+                        "For Gmail, use an App Password instead of your regular password"
+                    ),
+                    "validation": {
+                        "required": True,
+                    },
                 },
-                {
-                    "id": "test",
-                    "type": "test",
-                    "label": "Test Connection",
-                    "style": "secondary",
-                    "scope": "instance",
+            },
+            "imap_server": {
+                "type": "string",
+                "description": (
+                    "IMAP server address (e.g., imap.gmail.com, imap-mail.outlook.com)"
+                ),
+                "default": "imap.gmail.com",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "imap.gmail.com",
                 },
-                {
-                    "id": "fetch",
-                    "type": "fetch",
-                    "label": "Fetch Now",
-                    "style": "secondary",
-                    "scope": "instance",
+            },
+            "imap_port": {
+                "type": "integer",
+                "description": "IMAP server port (usually 993 for SSL)",
+                "default": 993,
+                "ui": {
+                    "component": "number",
+                    "min": 1,
+                    "max": 65535,
+                    "placeholder": "993",
                 },
-            ],
-        )
+            },
+            "check_interval": {
+                "type": "integer",
+                "description": (
+                    "How often to check for new emails (seconds, default: 300 = 5 minutes)"
+                ),
+                "default": 300,
+                "ui": {
+                    "component": "number",
+                    "min": 60,
+                    "max": 3600,
+                    "placeholder": "300",
+                    "help_text": "How often to check for new emails (60-3600 seconds)",
+                },
+            },
+            "target_directory": {
+                "type": "string",
+                "description": (
+                    "Directory to save downloaded images (defaults to local images directory)"
+                ),
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "./data/images (default)",
+                    "help_text": "Leave empty to use the local images directory",
+                },
+            },
+            "mark_as_read": {
+                "type": "boolean",
+                "description": "Mark processed emails as read (default: yes)",
+                "default": True,
+                "ui": {
+                    "component": "select",
+                    "options": [
+                        {"value": "true", "label": "Yes"},
+                        {"value": "false", "label": "No"},
+                    ],
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "instance",
+            },
+            {
+                "id": "test",
+                "type": "test",
+                "label": "Test Connection",
+                "style": "secondary",
+                "scope": "instance",
+            },
+            {
+                "id": "fetch",
+                "type": "fetch",
+                "label": "Fetch Now",
+                "style": "secondary",
+                "scope": "instance",
+            },
+        ],
+    )
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        email_address: str,
-        email_password: str,
-        imap_server: str = "imap.gmail.com",
-        imap_port: int = 993,
-        target_directory: Path | str | None = None,
-        check_interval: int = 300,  # Check every 5 minutes
-        mark_as_read: bool = True,
-        enabled: bool = True,
-    ):
-        """
-        Initialize IMAP backend plugin.
-
-        Args:
-            plugin_id: Unique identifier for the plugin
-            name: Human-readable name
-            email_address: Email address to check
-            email_password: Email password or app-specific password
-            imap_server: IMAP server address (default: imap.gmail.com)
-            imap_port: IMAP server port (default: 993 for SSL)
-            target_directory: Directory to save downloaded images (defaults to local images dir)
-            check_interval: How often to check for new emails (seconds, default: 300)
-            mark_as_read: Whether to mark processed emails as read (default: True)
-            enabled: Whether the plugin is enabled
-        """
+    def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         super().__init__(plugin_id, name, enabled)
-        self.email_address = email_address
-        self.email_password = email_password
-        self.imap_server = imap_server
-        self.imap_port = imap_port
-
-        # Determine target directory (defaults to local images directory)
-        if target_directory:
-            self.target_directory = Path(target_directory).resolve()
-        else:
-            # Use same directory as local images plugin
-            image_dir_str = os.getenv("IMAGE_DIR")
-            if image_dir_str:
-                self.target_directory = Path(image_dir_str).resolve()
-            else:
-                self.target_directory = Path("./data/images").resolve()
-
-        self.target_directory.mkdir(parents=True, exist_ok=True)
-        self.check_interval = check_interval
-        self.mark_as_read = mark_as_read
         self.supported_formats = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
         self._processed_emails: set[str] = set()  # Track processed email UIDs
 
-    async def initialize(self) -> None:
-        """Initialize the plugin."""
-        # No need to scan - LocalImagePlugin will handle that
-        pass
+    # Config accessors — values live in self.config (schema-normalized);
+    # these apply the trims/fallbacks the wire format doesn't guarantee.
 
-    async def cleanup(self) -> None:
-        """Cleanup plugin resources."""
-        # No cleanup needed - no background tasks running
-        pass
+    @property
+    def email_address(self) -> str:
+        return str(self.config.get("email_address") or "").strip()
+
+    @property
+    def email_password(self) -> str:
+        return str(self.config.get("email_password") or "").strip()
+
+    @property
+    def imap_server(self) -> str:
+        return str(self.config.get("imap_server") or "").strip() or "imap.gmail.com"
+
+    @property
+    def imap_port(self) -> int:
+        return int(self.config.get("imap_port") or 993)
+
+    @property
+    def check_interval(self) -> int:
+        return int(self.config.get("check_interval") or 300)
+
+    @property
+    def mark_as_read(self) -> bool:
+        value = self.config.get("mark_as_read")
+        return True if value is None else bool(value)
+
+    @property
+    def target_directory(self) -> Path:
+        """Directory images are saved to (defaults to the local images dir)."""
+        configured = str(self.config.get("target_directory") or "").strip()
+        if configured:
+            return Path(configured).resolve()
+        image_dir = os.getenv("IMAGE_DIR")
+        if image_dir:
+            return Path(image_dir).resolve()
+        return Path("./data/images").resolve()
+
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration; re-register the scheduled task if the interval changed."""
+        old_check_interval = self.check_interval
+
+        await super().configure(config)
+
+        self.target_directory.mkdir(parents=True, exist_ok=True)
+
+        # Re-register scheduled tasks if interval changed and plugin is running
+        if self.is_running() and self.enabled and old_check_interval != self.check_interval:
+            from app.services.backend_scheduler import backend_plugin_scheduler
+
+            if backend_plugin_scheduler.scheduler.running:
+                try:
+                    await backend_plugin_scheduler.unregister_plugin_tasks(self.plugin_id)
+                    await backend_plugin_scheduler.register_plugin_tasks(self)
+                except Exception as e:
+                    logger.warning(
+                        "Error re-registering scheduled tasks for IMAP plugin {} "
+                        "after config change: {}",
+                        self.plugin_id,
+                        e,
+                    )
+
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require credentials; bound the IMAP port and check interval."""
+        normalized = cls.normalize_config(config)
+        if not str(normalized.get("email_address") or "").strip():
+            return False
+        if not str(normalized.get("email_password") or "").strip():
+            return False
+
+        imap_port = normalized.get("imap_port")
+        if imap_port is not None and not (1 <= int(imap_port) <= 65535):
+            return False
+
+        check_interval = normalized.get("check_interval")
+        if check_interval is not None and not (60 <= int(check_interval) <= 3600):
+            return False
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Scheduled checking
+    # ------------------------------------------------------------------
 
     async def get_schedule_config(self) -> dict[str, Any] | None:
         """Return schedule configuration for scheduled email checking."""
@@ -279,18 +274,16 @@ class ImapBackendPlugin(BackendPlugin):
                         "message": f"Downloaded {images_downloaded} image(s) from email",
                         "data": {"images_downloaded": images_downloaded},
                     }
-                else:
-                    return {
-                        "success": True,
-                        "message": "No new emails with image attachments found",
-                        "data": {"images_downloaded": 0},
-                    }
-            else:
                 return {
-                    "success": False,
-                    "message": result.get("message", "Error checking emails"),
+                    "success": True,
+                    "message": "No new emails with image attachments found",
                     "data": {"images_downloaded": 0},
                 }
+            return {
+                "success": False,
+                "message": result.get("message", "Error checking emails"),
+                "data": {"images_downloaded": 0},
+            }
         except Exception as e:
             logger.exception("Error in scheduled IMAP task")
             return {
@@ -298,6 +291,23 @@ class ImapBackendPlugin(BackendPlugin):
                 "message": f"Error checking emails: {str(e)}",
                 "data": {"images_downloaded": 0},
             }
+
+    async def fetch(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """On-demand "check mail now" — runs the email check on this instance."""
+        result = await self.run_scheduled_task()
+        return {
+            "success": result.get("success", False),
+            "message": result.get("message", ""),
+            "images_downloaded": result.get("data", {}).get("images_downloaded", 0),
+        }
+
+    # ------------------------------------------------------------------
+    # IMAP mechanics
+    # ------------------------------------------------------------------
 
     def _check_emails_sync(self) -> dict[str, Any]:
         """Synchronous email checking (runs in thread pool).
@@ -367,7 +377,10 @@ class ImapBackendPlugin(BackendPlugin):
             mail.logout()
             return {
                 "success": True,
-                "message": f"Processed {len(email_ids)} email(s), downloaded {images_downloaded} image(s)",
+                "message": (
+                    f"Processed {len(email_ids)} email(s), "
+                    f"downloaded {images_downloaded} image(s)"
+                ),
                 "images_downloaded": images_downloaded,
             }
 
@@ -379,13 +392,18 @@ class ImapBackendPlugin(BackendPlugin):
             ):
                 return {
                     "success": False,
-                    "message": "Authentication failed. Please check your email address and password.",
+                    "message": (
+                        "Authentication failed. Please check your email address and password."
+                    ),
                     "images_downloaded": 0,
                 }
             elif "connection refused" in error_msg.lower() or "timeout" in error_msg.lower():
                 return {
                     "success": False,
-                    "message": f"Could not connect to {self.imap_server}. Please check the server address and port.",
+                    "message": (
+                        f"Could not connect to {self.imap_server}. "
+                        "Please check the server address and port."
+                    ),
                     "images_downloaded": 0,
                 }
             else:
@@ -409,6 +427,8 @@ class ImapBackendPlugin(BackendPlugin):
             Number of images downloaded
         """
         images_downloaded = 0
+        target_directory = self.target_directory
+        target_directory.mkdir(parents=True, exist_ok=True)
 
         for part in email_message.walk():
             content_disposition = str(part.get("Content-Disposition", ""))
@@ -439,12 +459,12 @@ class ImapBackendPlugin(BackendPlugin):
                         continue
 
                     # Save image to target directory
-                    image_path = self.target_directory / decoded_filename
+                    image_path = target_directory / decoded_filename
                     # Avoid overwriting existing files
                     counter = 1
                     while image_path.exists():
                         stem = Path(decoded_filename).stem
-                        image_path = self.target_directory / f"{stem}_{counter}{file_ext}"
+                        image_path = target_directory / f"{stem}_{counter}{file_ext}"
                         counter += 1
 
                     with open(image_path, "wb") as f:
@@ -476,42 +496,18 @@ class ImapBackendPlugin(BackendPlugin):
         except Exception:
             return filename
 
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin configuration."""
-        # Check required fields
-        email_address = extract_config_value(config, "email_address", default="", converter=to_str)
-        email_password = extract_config_value(
-            config, "email_password", default="", converter=to_str
-        )
-
-        if not email_address or not email_address.strip():
-            return False
-        if not email_password or not email_password.strip():
-            return False
-
-        # Validate IMAP port if provided
-        if "imap_port" in config:
-            imap_port = extract_config_value(config, "imap_port", default=993, converter=to_int)
-            if imap_port < 1 or imap_port > 65535:
-                return False
-
-        # Validate check_interval if provided
-        if "check_interval" in config:
-            check_interval = extract_config_value(
-                config, "check_interval", default=300, converter=to_int
-            )
-            if check_interval < 60 or check_interval > 3600:
-                return False
-
-        return True
+    # ------------------------------------------------------------------
+    # Connection test
+    # ------------------------------------------------------------------
 
     @classmethod
-    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
-        """Test IMAP connection using the provided configuration."""
-        email_address = config.get("email_address", "")
-        email_password = config.get("email_password", "")
-        imap_server = config.get("imap_server", "imap.gmail.com")
-        imap_port = int(config.get("imap_port", 993))
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Test IMAP connection using the provided (possibly unsaved) configuration."""
+        normalized = cls.normalize_config(config)
+        email_address = str(normalized.get("email_address") or "").strip()
+        email_password = str(normalized.get("email_password") or "").strip()
+        imap_server = str(normalized.get("imap_server") or "").strip() or "imap.gmail.com"
+        imap_port = int(normalized.get("imap_port") or 993)
 
         if not email_address or not email_password:
             return {
@@ -538,12 +534,17 @@ class ImapBackendPlugin(BackendPlugin):
             ):
                 return {
                     "success": False,
-                    "message": "Authentication failed. Please check your email address and password.",
+                    "message": (
+                        "Authentication failed. Please check your email address and password."
+                    ),
                 }
             if "connection refused" in error_msg.lower() or "timeout" in error_msg.lower():
                 return {
                     "success": False,
-                    "message": f"Could not connect to {imap_server}. Please check the server address and port.",
+                    "message": (
+                        f"Could not connect to {imap_server}. "
+                        "Please check the server address and port."
+                    ),
                 }
             return {
                 "success": False,
@@ -554,216 +555,3 @@ class ImapBackendPlugin(BackendPlugin):
                 "success": False,
                 "message": f"Error: {str(e)}",
             }
-
-    @classmethod
-    async def fetch_type_data(cls, instance_id: str | None = None) -> dict[str, Any] | None:
-        """Manually trigger an IMAP fetch using a loaded backend instance."""
-        from app.models.db_models import PluginDB
-        from app.plugins.manager import plugin_manager
-
-        if instance_id:
-            db_plugin = await PluginDB.objects.get_or_none(id=instance_id)
-            imap_plugins_db = [db_plugin] if db_plugin and db_plugin.type_id == "imap" else []
-        else:
-            imap_plugins_db = await PluginDB.objects.filter(type_id="imap").all()
-
-        if not imap_plugins_db:
-            return {
-                "success": False,
-                "message": "IMAP plugin instance not found. Please configure and enable the IMAP plugin first.",
-                "images_downloaded": 0,
-            }
-
-        imap_plugin = None
-        for db_plugin in imap_plugins_db:
-            plugin = plugin_manager.get_plugin(db_plugin.id)
-            if isinstance(plugin, cls):
-                imap_plugin = plugin
-                break
-
-        if not imap_plugin:
-            return {
-                "success": False,
-                "message": "IMAP plugin instance found in database but not loaded. Please restart the application.",
-                "images_downloaded": 0,
-            }
-
-        result = await imap_plugin.run_scheduled_task()
-        return {
-            "success": result.get("success", False),
-            "message": result.get("message", ""),
-            "images_downloaded": result.get("data", {}).get("images_downloaded", 0),
-        }
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        """Configure the plugin with new settings."""
-        from app.services.backend_scheduler import backend_plugin_scheduler
-
-        await super().configure(config)
-
-        old_check_interval = self.check_interval
-
-        if "email_address" in config:
-            self.email_address = extract_config_value(
-                config, "email_address", default="", converter=to_str
-            )
-
-        if "email_password" in config:
-            self.email_password = extract_config_value(
-                config, "email_password", default="", converter=to_str
-            )
-
-        if "imap_server" in config:
-            self.imap_server = extract_config_value(
-                config, "imap_server", default="imap.gmail.com", converter=to_str
-            )
-
-        if "imap_port" in config:
-            self.imap_port = extract_config_value(
-                config, "imap_port", default=993, converter=to_int
-            )
-
-        if "target_directory" in config:
-            target_dir = extract_config_value(
-                config, "target_directory", default="", converter=to_str
-            )
-            if target_dir and target_dir.strip():
-                self.target_directory = Path(target_dir).resolve()
-                self.target_directory.mkdir(parents=True, exist_ok=True)
-
-        if "check_interval" in config:
-            self.check_interval = extract_config_value(
-                config, "check_interval", default=300, converter=to_int
-            )
-
-        if "mark_as_read" in config:
-            mark_as_read = extract_config_value(
-                config, "mark_as_read", default=True, converter=to_bool
-            )
-            # Handle string values like "true"/"false" that might come from UI
-            if isinstance(mark_as_read, str):
-                self.mark_as_read = mark_as_read.lower() in ("true", "1", "yes")
-            else:
-                self.mark_as_read = bool(mark_as_read)
-
-        # Re-register scheduled tasks if interval changed and plugin is running
-        if (
-            self.is_running()
-            and self.enabled
-            and old_check_interval != self.check_interval
-            and backend_plugin_scheduler.scheduler.running
-        ):
-            try:
-                # Unregister old tasks
-                await backend_plugin_scheduler.unregister_plugin_tasks(self.plugin_id)
-                # Register new tasks with updated interval
-                await backend_plugin_scheduler.register_plugin_tasks(self)
-            except Exception as e:
-                logger.warning(
-                    f"Error re-registering scheduled tasks for IMAP plugin {self.plugin_id} after config change: {e}",
-                    exc_info=True,
-                )
-
-
-# Register this plugin with pluggy
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    """Register ImapBackendPlugin type."""
-    return [ImapBackendPlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> ImapBackendPlugin | None:
-    """Create an ImapBackendPlugin instance."""
-    return create_backend_plugin_instance(
-        ImapBackendPlugin,
-        expected_type_id="imap",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=BACKEND_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    """Handle IMAP plugin configuration update and instance management."""
-    if type_id != "imap":
-        return None
-
-    def validate_config(c: dict[str, Any]) -> bool:
-        """Validate config before creating/updating instance."""
-        # Check required fields
-        email_address = c.get("email_address", "")
-        email_password = c.get("email_password", "")
-
-        if not email_address or not email_address.strip():
-            logger.info("[IMAP] Skipping instance creation - missing email address")
-            return False
-        if not email_password or not email_password.strip():
-            logger.info("[IMAP] Skipping instance creation - missing email password")
-            return False
-
-        # Validate IMAP port if provided
-        imap_port = c.get("imap_port", 993)
-        if imap_port < 1 or imap_port > 65535:
-            logger.info("[IMAP] Skipping instance creation - invalid IMAP port")
-            return False
-
-        # Validate check_interval if provided
-        check_interval = c.get("check_interval", 300)
-        if check_interval < 60 or check_interval > 3600:
-            logger.info("[IMAP] Skipping instance creation - invalid check interval")
-            return False
-
-        return True
-
-    def generate_instance_id(c: dict[str, Any], t_id: str) -> str:
-        """Generate instance ID from config values."""
-        # Generate unique instance ID based on email address and server
-        email_address = c.get("email_address", "")
-        imap_server = c.get("imap_server", "imap.gmail.com")
-
-        # Create a hash from email and server to generate unique ID
-        config_str = f"{email_address}_{imap_server}"
-        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
-        return f"{t_id}-{config_hash}"
-
-    def prepare_instance_config(c: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
-        """Prepare final config for instance creation."""
-        instance_config = c.copy()
-
-        # Use instance name from metadata or generate default
-        email_address = c.get("email_address", "")
-        if not metadata.get("instance_name"):
-            instance_config["_instance_name"] = f"IMAP Email ({email_address})"
-        else:
-            instance_config["_instance_name"] = metadata["instance_name"]
-
-        return instance_config
-
-    manager_config = build_backend_manager_config(
-        type_id="imap",
-        fields=BACKEND_FIELDS,
-        single_instance=False,  # Multi-instance plugin
-        validate_config=validate_config,
-        generate_instance_id=generate_instance_id,
-        prepare_instance_config=prepare_instance_config,
-        default_instance_name="IMAP Email",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )
