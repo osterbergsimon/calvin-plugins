@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scaffold a new Calvin plugin.
+Scaffold a new Calvin plugin (plugin contract 1.0).
 
 Usage:
     python scripts/create_plugin.py <type> <id> [options]
@@ -22,6 +22,13 @@ Options:
     --label LABEL         Instance label shown in UI (e.g. Location, Device)
     --author AUTHOR       Author name
     --no-tests            Skip generating test file
+
+A 1.0 plugin is ONE class with a `metadata = PluginMetadata(...)` attribute
+plus a plugin.json declaring `api_version`. There are no registration hooks:
+the host discovers the class, generates the settings form from
+`instance_config_schema`, normalizes config into `self.config`, and (for
+service plugins) draws the panel from `display_schema` using a built-in
+renderer.
 
 Examples:
     python scripts/create_plugin.py service yr-pro --name "Yr.no Pro" --label Location
@@ -65,8 +72,7 @@ def to_type_id(plugin_id: str) -> str:
 
 def generate_plugin_json(plugin_id, name, plugin_type, description, author):
     manifest = {
-        "format_version": "1.0.0",
-        "protocol_version": 1,
+        "api_version": 1,
         "id": to_type_id(plugin_id),
         "name": name,
         "version": "1.0.0",
@@ -78,22 +84,21 @@ def generate_plugin_json(plugin_id, name, plugin_type, description, author):
     return json.dumps(manifest, indent=2) + "\n"
 
 
-def _protocol_methods(plugin_type: str) -> list[str]:
-    """Return lines (without trailing newline) for the type-specific protocol methods."""
+def _family_method_lines(plugin_type: str) -> list[str]:
+    """Lines for the family-specific methods (verbs) of the plugin class."""
     if plugin_type == "service":
         return [
-            "    async def get_content(self) -> dict[str, Any]:",
-            "        return {",
-            '            "type": "api",',
-            '            "url": f"/api/plugins/{self.plugin_id}/data",',
-            "        }",
-            "",
-            "    async def validate_config(self, config: dict[str, Any]) -> bool:",
-            "        return True",
+            "    async def fetch(",
+            "        self, start_date: str | None = None, end_date: str | None = None",
+            "    ) -> dict[str, Any]:",
+            '        """Return the payload the display_schema binds to."""',
+            "        # TODO: fetch real data (self.config holds the instance settings)",
+            '        return {"message": "hello from " + self.plugin_id}',
         ]
     if plugin_type == "image":
         return [
             "    async def get_images(self) -> list[dict[str, Any]]:",
+            "        # TODO: return image metadata dicts (id, filename, path, ...)",
             "        return []",
             "",
             "    async def get_image(self, image_id: str) -> dict[str, Any] | None:",
@@ -108,304 +113,133 @@ def _protocol_methods(plugin_type: str) -> list[str]:
     if plugin_type == "calendar":
         return [
             "    async def fetch_events(",
-            "        self, start_date: str | None = None, end_date: str | None = None",
-            "    ) -> list[dict[str, Any]]:",
+            "        self, start_date: datetime, end_date: datetime",
+            "    ) -> list[CalendarEvent]:",
+            '        """Fetch events overlapping [start_date, end_date] (timezone-aware)."""',
+            "        # TODO: fetch and map to CalendarEvent",
             "        return []",
-            "",
-            "    async def validate_config(self, config: dict[str, Any]) -> bool:",
-            "        return True",
         ]
     # backend
     return [
-        "    async def validate_config(self, config: dict[str, Any]) -> bool:",
-        "        return True",
+        "    # Backend plugins are headless. Uncomment what you need:",
+        "    #",
+        "    # async def get_schedule_config(self) -> dict[str, Any] | None:",
+        '    #     return {"interval": 300, "enabled": True}',
+        "    #",
+        "    # async def run_scheduled_task(self) -> dict[str, Any]:",
+        '    #     return {"success": True}',
+        "    #",
+        "    # async def get_subscribed_events(self) -> list[str]:",
+        '    #     return ["image_uploaded"]',
+        "    #",
+        "    # async def handle_event(self, event_type, event_data):",
+        "    #     return None",
+    ]
+
+
+def _display_schema_lines(plugin_type: str) -> list[str]:
+    """display_schema/statusbar_schema metadata lines (service plugins only)."""
+    if plugin_type != "service":
+        return []
+    return [
+        "        # How the panel is drawn — a built-in renderer, no frontend code.",
+        "        # Kinds: status, card-grid, item-list, iframe, image-with-caption,",
+        "        # metric-dashboard, weather-forecast, web-component.",
+        "        display_schema={",
+        '            "kind": "status",',
+        '            "item": {"label": "Message", "value_path": "$.message"},',
+        '            "poll_interval_ms": 60000,',
+        "        },",
+        "        # Optional item in the clock bar (kinds: status):",
+        '        # statusbar_schema={"kind": "status", "item": {"value_path": "$.message"}},',
     ]
 
 
 def generate_plugin_py(plugin_id, name, plugin_type, description, single_instance, instance_label):
     cn = to_class_name(plugin_id) + PLUGIN_CLASS_MAP[plugin_type].replace("Plugin", "")
     tid = to_type_id(plugin_id)
-    multi = "False" if single_instance else "True"
-
-    if plugin_type == "service":
-        lines = [
-            f'"""{name} plugin."""',
-            "",
-            "from typing import Any",
-            "",
-            "from app.plugins.hooks import hookimpl",
-            "from app.plugins.protocols import ServicePlugin",
-            "from app.plugins.sdk.service import (",
-            "    ServiceConfigField,",
-            "    build_service_manager_config,",
-            "    build_service_plugin_metadata,",
-            "    create_service_plugin_instance,",
-            ")",
-            "from app.plugins.utils.instance_manager import handle_plugin_config_update_generic",
-            "",
-            "",
-            "SERVICE_FIELDS = (",
-            "    # TODO: add your config fields here",
-            '    # ServiceConfigField("api_key", default="", converter=str),',
-            ")",
-            "",
-            "",
-            f"class {cn}(ServicePlugin):",
-            f'    """{description}"""',
-            "",
-            "    @classmethod",
-            "    def get_plugin_metadata(cls) -> dict[str, Any]:",
-            "        return build_service_plugin_metadata(",
-            f'            type_id="{tid}",',
-            f'            name="{name}",',
-            f'            description="{description}",',
-            "            plugin_class=cls,",
-            f"            supports_multiple_instances={multi},",
-        ]
-
-        if instance_label:
-            lines.append(f'            instance_label="{instance_label}",')
-
-        lines += [
-            "            common_config_schema={},",
-            "            instance_config_schema={",
-            "                # TODO: add your config fields here",
-            '                # "my_field": {',
-            '                #     "type": "string",',
-            '                #     "description": "A required field",',
-            '                #     "default": "",',
-            '                #     "ui": {"component": "input", "validation": {"required": True}},',
-            "                # },",
-            "            },",
-            "        )",
-            "",
-            "    def __init__(self, plugin_id: str, name: str, enabled: bool = True):",
-            "        super().__init__(plugin_id, name, enabled)",
-            "        # TODO: assign config-backed instance variables",
-            "",
-            "    async def initialize(self) -> None:",
-            "        pass",
-            "",
-            "    async def cleanup(self) -> None:",
-            "        pass",
-            "",
-            "    async def get_content(self) -> dict[str, Any]:",
-            "        return {",
-            '            "type": "api",',
-            '            "url": f"/api/plugins/{self.plugin_id}/data",',
-            "        }",
-            "",
-            "    async def validate_config(self, config: dict[str, Any]) -> bool:",
-            "        return True",
-            "",
-            "    async def configure(self, config: dict[str, Any]) -> None:",
-            "        await super().configure(config)",
-            "        # TODO: update instance variables from config",
-            "",
-            "",
-            "@hookimpl",
-            "def register_plugin_types() -> list[dict[str, Any]]:",
-            f"    return [{cn}.get_plugin_metadata()]",
-            "",
-            "",
-            "@hookimpl",
-            "def create_plugin_instance(",
-            "    plugin_id: str, type_id: str, name: str, config: dict[str, Any]",
-            f") -> {cn} | None:",
-            "    return create_service_plugin_instance(",
-            f"        {cn},",
-            f'        expected_type_id="{tid}",',
-            "        plugin_id=plugin_id,",
-            "        type_id=type_id,",
-            "        name=name,",
-            "        config=config,",
-            "        fields=SERVICE_FIELDS,",
-            "    )",
-            "",
-            "",
-            "@hookimpl",
-            "async def handle_plugin_config_update(",
-            "    type_id: str, config: dict[str, Any], enabled: bool | None, db_type: Any, session: Any",
-            ") -> dict[str, Any] | None:",
-            f'    if type_id != "{tid}":',
-            "        return None",
-            "    return await handle_plugin_config_update_generic(",
-            "        type_id,",
-            "        config,",
-            "        enabled,",
-            "        db_type,",
-            "        session,",
-            "        build_service_manager_config(",
-            f'            type_id="{tid}",',
-            "            fields=SERVICE_FIELDS,",
-            f"            single_instance={str(single_instance)},",
-        ]
-
-        if single_instance:
-            lines.append(f'            instance_id="{tid}-instance",')
-
-        lines += [
-            f'            default_instance_name="{name}",',
-            "        ),",
-            "    )",
-            "",
-        ]
-        return "\n".join(lines)
-
-    sdk_config = {
-        "image": {
-            "protocol": "ImagePlugin",
-            "sdk_module": "image",
-            "config_field": "ImageConfigField",
-            "field_group": "IMAGE_FIELDS",
-            "build_metadata": "build_image_plugin_metadata",
-            "create_instance": "create_image_plugin_instance",
-            "build_manager": "build_image_manager_config",
-        },
-        "calendar": {
-            "protocol": "CalendarPlugin",
-            "sdk_module": "calendar",
-            "config_field": "CalendarConfigField",
-            "field_group": "CALENDAR_FIELDS",
-            "build_metadata": "build_calendar_plugin_metadata",
-            "create_instance": "create_calendar_plugin_instance",
-            "build_manager": "build_calendar_manager_config",
-        },
-        "backend": {
-            "protocol": "BackendPlugin",
-            "sdk_module": "backend",
-            "config_field": "BackendConfigField",
-            "field_group": "BACKEND_FIELDS",
-            "build_metadata": "build_backend_plugin_metadata",
-            "create_instance": "create_backend_plugin_instance",
-            "build_manager": "build_backend_manager_config",
-        },
-    }[plugin_type]
+    protocol = PLUGIN_CLASS_MAP[plugin_type]
 
     lines = [
         f'"""{name} plugin."""',
         "",
+    ]
+    if plugin_type == "calendar":
+        lines += ["from datetime import datetime", ""]
+    lines += [
         "from typing import Any",
         "",
-        "from app.plugins.hooks import hookimpl",
-        f'from app.plugins.protocols import {sdk_config["protocol"]}',
-        f'from app.plugins.sdk.{sdk_config["sdk_module"]} import (',
-        f'    {sdk_config["config_field"]},',
-        f'    {sdk_config["build_manager"]},',
-        f'    {sdk_config["build_metadata"]},',
-        f'    {sdk_config["create_instance"]},',
-        ")",
-        "from app.plugins.utils.instance_manager import handle_plugin_config_update_generic",
+    ]
+    if plugin_type == "calendar":
+        lines += ["from app.models.calendar import CalendarEvent"]
+    lines += [
+        "from app.plugins.definitions import PluginMetadata",
+        f"from app.plugins.protocols import {protocol}",
         "",
         "",
-        f'{sdk_config["field_group"]} = (',
-        "    # TODO: add your config fields here",
-        f'    # {sdk_config["config_field"]}("api_key", default="", converter=str),',
-        ")",
-        "",
-        "",
-        f"class {cn}({sdk_config['protocol']}):",
+        f"class {cn}({protocol}):",
         f'    """{description}"""',
         "",
-        "    @classmethod",
-        "    def get_plugin_metadata(cls) -> dict[str, Any]:",
-        f'        return {sdk_config["build_metadata"]}(',
-        f'            type_id="{tid}",',
-        f'            name="{name}",',
-        f'            description="{description}",',
-        "            plugin_class=cls,",
-        f"            supports_multiple_instances={multi},",
-    ]
-
-    if instance_label:
-        lines.append(f'            instance_label="{instance_label}",')
-
-    lines += [
-        "            common_config_schema={},",
-        "            instance_config_schema={",
-        "                # TODO: add your config fields here",
-        '                # "my_field": {',
-        '                #     "type": "string",',
-        '                #     "description": "A required field",',
-        '                #     "default": "",',
-        '                #     "ui": {"component": "input", "validation": {"required": True}},',
-        "                # },",
-        "            },",
-        "        )",
-        "",
-        "    def __init__(self, plugin_id: str, name: str, enabled: bool = True):",
-        "        super().__init__(plugin_id, name, enabled)",
-        "        # TODO: assign config-backed instance variables",
-        "",
-        "    async def initialize(self) -> None:",
-        "        pass",
-        "",
-        "    async def cleanup(self) -> None:",
-        "        pass",
-        "",
-    ]
-
-    lines += _protocol_methods(plugin_type)
-
-    lines += [
-        "",
-        "    async def configure(self, config: dict[str, Any]) -> None:",
-        "        await super().configure(config)",
-        "        # TODO: update instance variables from config",
-        "",
-        "",
-        "@hookimpl",
-        "def register_plugin_types() -> list[dict[str, Any]]:",
-        f"    return [{cn}.get_plugin_metadata()]",
-        "",
-        "",
-        "@hookimpl",
-        "def create_plugin_instance(",
-        "    plugin_id: str, type_id: str, name: str, config: dict[str, Any]",
-        f") -> {cn} | None:",
-        f'    return {sdk_config["create_instance"]}(',
-        f"        {cn},",
-    ]
-
-    if plugin_type == "calendar":
-        lines.append(f'        expected_type_ids="{tid}",')
-    else:
-        lines.append(f'        expected_type_id="{tid}",')
-
-    lines += [
-        "        plugin_id=plugin_id,",
-        "        type_id=type_id,",
-        "        name=name,",
-        "        config=config,",
-        f'        fields={sdk_config["field_group"]},',
-        "    )",
-        "",
-        "",
-        "@hookimpl",
-        "async def handle_plugin_config_update(",
-        "    type_id: str, config: dict[str, Any], enabled: bool | None, db_type: Any, session: Any",
-        ") -> dict[str, Any] | None:",
-        f'    if type_id != "{tid}":',
-        "        return None",
-        "    return await handle_plugin_config_update_generic(",
-        "        type_id,",
-        "        config,",
-        "        enabled,",
-        "        db_type,",
-        "        session,",
-        f'        {sdk_config["build_manager"]}(',
-        f'            type_id="{tid}",',
-        f'            fields={sdk_config["field_group"]},',
-        f"            single_instance={str(single_instance)},",
+        "    metadata = PluginMetadata(",
+        f'        type_id="{tid}",',
+        f'        name="{name}",',
+        f'        description="{description}",',
+        f'        default_instance_name="{name}",',
     ]
 
     if single_instance:
-        lines.append(f'            instance_id="{tid}-instance",')
+        lines += [
+            "        supports_multiple_instances=False,",
+            f'        fixed_instance_id="{tid}-instance",',
+        ]
+    else:
+        if instance_label:
+            lines.append(f'        instance_label="{instance_label}",')
+        lines += [
+            "        # Config keys that identify an instance (same values -> same",
+            "        # instance). TODO: set to your natural identity, e.g. [\"url\"].",
+            "        # instance_identity=[\"url\"],",
+        ]
 
     lines += [
-        f'            default_instance_name="{name}",',
-        "        ),",
+        "        # Config is declared ONCE, here. The host generates the settings",
+        "        # form, normalizes values by type, and fills self.config.",
+        "        instance_config_schema={",
+        "            # TODO: add your config fields",
+        '            # "url": {',
+        '            #     "type": "string",  # string | password | integer | number | boolean',
+        '            #     "description": "Server URL",',
+        '            #     "default": "",',
+        '            #     "ui": {"component": "input", "validation": {"required": True}},',
+        "            # },",
+        "        },",
+    ]
+    lines += _display_schema_lines(plugin_type)
+    lines += [
         "    )",
+        "",
+        "    async def initialize(self) -> None:",
+        '        """Connect/validate. self.config holds normalized instance config."""',
+        "",
+        "    async def cleanup(self) -> None:",
+        '        """Release resources (close clients, etc.)."""',
+        "",
+    ]
+    lines += _family_method_lines(plugin_type)
+    lines += [
+        "",
+        "    # Optional extras (delete if unused):",
+        "    #",
+        "    # @classmethod",
+        "    # async def validate_config(cls, config: dict[str, Any]) -> bool:",
+        '    #     """Extra rules beyond schema-required fields."""',
+        "    #     normalized = cls.normalize_config(config)",
+        '    #     return str(normalized.get("url", "")).startswith("http")',
+        "    #",
+        "    # @classmethod",
+        "    # async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:",
+        '    #     """Power a \\"Test Connection\\" button (declare a ui_action type=\\"test\\")."""',
+        '    #     return {"success": True, "message": "OK"}',
         "",
     ]
 
@@ -417,18 +251,22 @@ def generate_test_py(plugin_id, name, plugin_type):
     tid = to_type_id(plugin_id)
 
     lines = [
-        f'"""Tests for {name}.',
+        f'"""Tests for {name} (plugin contract 1.0).',
         "",
-        "Run from the backend directory:",
-        f"    cd backend && pytest ../{plugin_id}/test_{tid}.py -v",
+        "Run from the calvin backend directory:",
+        f"    cd calvin/backend && uv run pytest ../../calvin-plugins/{plugin_id}/test_{tid}.py",
         '"""',
         "",
         "import importlib.util",
+        "import types",
         "from pathlib import Path",
         "",
         "import pytest",
         "",
-        f'_spec = importlib.util.spec_from_file_location("{tid}", Path(__file__).parent / "plugin.py")',
+        "from app.plugins.definitions import PluginMetadata",
+        "from app.plugins.loader import PluginLoader",
+        "",
+        '_spec = importlib.util.spec_from_file_location("' + tid + '", Path(__file__).parent / "plugin.py")',
         "_mod = importlib.util.module_from_spec(_spec)",
         "_spec.loader.exec_module(_mod)",
         f"{cn} = _mod.{cn}",
@@ -440,18 +278,21 @@ def generate_test_py(plugin_id, name, plugin_type):
         "",
         "",
         f"class Test{cn}:",
+        "    def test_discoverable_by_loader(self):",
+        '        module = types.ModuleType("installed_plugin_' + tid + '")',
+        f"        module.{cn} = {cn}",
+        f'        assert PluginLoader().register_module(module) == ["{tid}"]',
+        "",
         "    def test_metadata(self):",
-        f"        meta = {cn}.get_plugin_metadata()",
-        f'        assert meta["type_id"] == "{tid}"',
-        f'        assert meta["name"] == "{name}"',
+        f"        assert isinstance({cn}.metadata, PluginMetadata)",
+        f'        assert {cn}.metadata.type_id == "{tid}"',
         "",
-        "    def test_init(self, plugin):",
-        '        assert plugin.plugin_id == "test"',
-        "        assert plugin.enabled is True",
+        "    async def test_configure_fills_config(self, plugin):",
+        "        await plugin.configure({})",
+        "        assert isinstance(plugin.config, dict)",
         "",
-        "    @pytest.mark.asyncio",
-        "    async def test_validate_config(self, plugin):",
-        "        assert await plugin.validate_config({}) is True",
+        "    async def test_validate_config(self):",
+        f"        assert await {cn}.validate_config({{}}) in (True, False)",
         "",
     ]
 
@@ -504,7 +345,7 @@ def create_plugin(args: argparse.Namespace) -> int:
     print("Next steps:")
     print(f"  1. Edit {plugin_id}/plugin.py — fill in instance_config_schema and business logic")
     print(f"  2. Run:  python scripts/validate_plugins.py {plugin_id}")
-    print(f"  3. Run:  cd backend && pytest ../{plugin_id}/test_{tid}.py -v")
+    print(f"  3. Run:  cd calvin/backend && uv run pytest ../../calvin-plugins/{plugin_id}")
 
     try:
         subprocess.run(

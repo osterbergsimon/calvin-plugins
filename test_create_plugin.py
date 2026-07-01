@@ -1,4 +1,4 @@
-"""Tests for plugin scaffolding."""
+"""Tests for plugin scaffolding (contract 1.0)."""
 
 import argparse
 
@@ -12,21 +12,8 @@ generate_plugin_py = _mod.generate_plugin_py
 _validator_mod = load_script("validate_plugins")
 
 
-def test_service_scaffold_uses_service_sdk():
-    plugin_py = generate_plugin_py("demo-service", "Demo Service", "service", "Demo", False, None)
-
-    assert "from app.plugins.sdk.service import (" in plugin_py
-    assert "ServiceConfigField" in plugin_py
-    assert "build_service_plugin_metadata(" in plugin_py
-    assert "create_service_plugin_instance(" in plugin_py
-    assert "build_service_manager_config(" in plugin_py
-
-
-def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monkeypatch):
-    monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
-
-    args = argparse.Namespace(
+def _args(**overrides):
+    defaults = dict(
         type="service",
         id="demo-service",
         name="Demo Service",
@@ -36,8 +23,53 @@ def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monke
         author="",
         no_tests=False,
     )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
 
-    result = create_plugin(args)
+
+def test_scaffold_is_declarative():
+    """The scaffold emits one class + PluginMetadata — no hooks, no SDK builders."""
+    for plugin_type in ("service", "image", "calendar", "backend"):
+        plugin_py = generate_plugin_py("demo-x", "Demo X", plugin_type, "Demo", False, "Thing")
+        assert "metadata = PluginMetadata(" in plugin_py
+        assert "from app.plugins.definitions import PluginMetadata" in plugin_py
+        for retired in (
+            "hookimpl",
+            "register_plugin_types",
+            "create_plugin_instance",
+            "handle_plugin_config_update",
+            "get_plugin_metadata",
+            "app.plugins.sdk",
+            "ConfigField",
+        ):
+            assert retired not in plugin_py, f"{plugin_type} scaffold contains {retired}"
+
+
+def test_service_scaffold_has_fetch_and_display_schema():
+    plugin_py = generate_plugin_py("demo-service", "Demo Service", "service", "Demo", False, None)
+    assert "async def fetch(" in plugin_py
+    assert '"kind": "status"' in plugin_py
+    assert "get_content" not in plugin_py
+
+
+def test_calendar_scaffold_uses_real_protocol_signature():
+    plugin_py = generate_plugin_py("demo-cal", "Demo Cal", "calendar", "Demo", False, "Calendar")
+    assert "async def fetch_events(" in plugin_py
+    assert "start_date: datetime" in plugin_py
+    assert "CalendarEvent" in plugin_py
+
+
+def test_single_instance_scaffold_declares_fixed_id():
+    plugin_py = generate_plugin_py("demo-image", "Demo Image", "image", "Demo", True, "Gallery")
+    assert "supports_multiple_instances=False" in plugin_py
+    assert 'fixed_instance_id="demo_image-instance"' in plugin_py
+
+
+def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monkeypatch):
+    monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
+
+    result = create_plugin(_args())
 
     plugin_dir = tmp_path / "demo-service"
     plugin_py = (plugin_dir / "plugin.py").read_text(encoding="utf-8")
@@ -47,68 +79,21 @@ def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monke
     assert _validator_mod.validate_plugins([plugin_dir]) == []
 
 
-def test_image_scaffold_uses_image_sdk():
-    plugin_py = generate_plugin_py("demo-image", "Demo Image", "image", "Demo", True, "Gallery")
-
-    assert "from app.plugins.sdk.image import (" in plugin_py
-    assert "ImageConfigField" in plugin_py
-    assert "build_image_plugin_metadata(" in plugin_py
-    assert 'instance_label="Gallery"' in plugin_py
-    assert 'expected_type_id="demo_image"' in plugin_py
-    assert 'instance_id="demo_image-instance"' in plugin_py
-
-
-def test_calendar_scaffold_uses_calendar_sdk():
-    plugin_py = generate_plugin_py(
-        "demo-calendar", "Demo Calendar", "calendar", "Demo", False, "Calendar"
-    )
-
-    assert "from app.plugins.sdk.calendar import (" in plugin_py
-    assert "CalendarConfigField" in plugin_py
-    assert "build_calendar_plugin_metadata(" in plugin_py
-    assert 'expected_type_ids="demo_calendar"' in plugin_py
-    assert "build_calendar_manager_config(" in plugin_py
-
-
-def test_backend_scaffold_uses_backend_sdk():
-    plugin_py = generate_plugin_py("demo-backend", "Demo Backend", "backend", "Demo", False, None)
-
-    assert "from app.plugins.sdk.backend import (" in plugin_py
-    assert "BackendConfigField" in plugin_py
-    assert "build_backend_plugin_metadata(" in plugin_py
-    assert "create_backend_plugin_instance(" in plugin_py
-    assert "build_backend_manager_config(" in plugin_py
-
-
-def test_generated_manifest_includes_protocol_version():
-    manifest_json = generate_plugin_json("demo-service", "Demo Service", "service", "Demo", "")
-
-    assert '"format_version": "1.0.0"' in manifest_json
-    assert '"protocol_version": 1' in manifest_json
-
-
-def test_generated_manifest_includes_protocol_version_for_all_types():
+def test_generated_manifest_declares_api_version():
     for plugin_type in ("service", "image", "calendar", "backend"):
         manifest_json = generate_plugin_json("demo-plugin", "Demo Plugin", plugin_type, "Demo", "")
-        assert '"protocol_version": 1' in manifest_json
+        assert '"api_version": 1' in manifest_json
+        assert "format_version" not in manifest_json
+        assert "protocol_version" not in manifest_json
 
 
-def test_create_plugin_writes_sdk_first_scaffold(tmp_path, monkeypatch):
+def test_create_plugin_writes_declarative_scaffold(tmp_path, monkeypatch):
     monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
 
-    args = argparse.Namespace(
-        type="image",
-        id="demo-gallery",
-        name="Demo Gallery",
-        description="Demo gallery plugin.",
-        single=True,
-        label="Gallery",
-        author="",
-        no_tests=False,
+    result = create_plugin(
+        _args(type="image", id="demo-gallery", name="Demo Gallery", single=True, label="Gallery")
     )
-
-    result = create_plugin(args)
 
     plugin_dir = tmp_path / "demo-gallery"
     plugin_py = (plugin_dir / "plugin.py").read_text(encoding="utf-8")
@@ -117,27 +102,19 @@ def test_create_plugin_writes_sdk_first_scaffold(tmp_path, monkeypatch):
     assert plugin_dir.exists()
     assert (plugin_dir / "plugin.json").exists()
     assert (plugin_dir / "test_demo_gallery.py").exists()
-    assert '"protocol_version": 1' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
-    assert "from app.plugins.sdk.image import (" in plugin_py
-    assert 'instance_id="demo_gallery-instance"' in plugin_py
+    assert '"api_version": 1' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
+    assert "metadata = PluginMetadata(" in plugin_py
+    assert 'fixed_instance_id="demo_gallery-instance"' in plugin_py
+    assert _validator_mod.validate_plugins([plugin_dir]) == []
 
 
 def test_create_plugin_prints_validator_next_step(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(_mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(_mod.subprocess, "run", lambda *args, **kwargs: None)
 
-    args = argparse.Namespace(
-        type="backend",
-        id="demo-worker",
-        name="Demo Worker",
-        description="Demo worker plugin.",
-        single=False,
-        label=None,
-        author="",
-        no_tests=True,
+    result = create_plugin(
+        _args(type="backend", id="demo-worker", name="Demo Worker", no_tests=True)
     )
-
-    result = create_plugin(args)
 
     captured = capsys.readouterr()
     assert result == 0

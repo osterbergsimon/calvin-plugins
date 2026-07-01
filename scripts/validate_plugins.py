@@ -38,8 +38,17 @@ APP_MANAGED_CONFIG_FIELD_KEYS = frozenset(
 VALID_ACTION_SCOPES = frozenset({"global", "instance"})
 VALID_PLUGIN_TYPES = frozenset({"calendar", "image", "service", "backend", "theme"})
 REQUIRED_PLUGIN_MANIFEST_FIELDS = ("id", "name", "version", "type")
-SUPPORTED_FORMAT_VERSION = "1.0.0"
-SUPPORTED_PROTOCOL_VERSION = 1
+SUPPORTED_API_VERSION = 1
+# Keys from the retired pre-1.0 display contract; their presence fails validation.
+LEGACY_DISPLAY_KEYS = frozenset({"type", "api_endpoint", "render_template", "component", "data_schema"})
+# Family protocol base class -> plugin type
+FAMILY_BASES = {
+    "CalendarPlugin": "calendar",
+    "ImagePlugin": "image",
+    "ServicePlugin": "service",
+    "BackendPlugin": "backend",
+    "SelfHostedGalleryImagePlugin": "image",
+}
 
 
 @dataclass
@@ -52,6 +61,8 @@ class MetadataRecord:
     common_config_schema: ast.Dict | None = None
     instance_config_schema: ast.Dict | None = None
     ui_actions: ast.List | None = None
+    display_schema: ast.Dict | None = None
+    statusbar_schema: ast.Dict | None = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -105,58 +116,58 @@ def load_json(path: Path) -> tuple[dict | None, str | None]:
 
 
 class MetadataVisitor(ast.NodeVisitor):
+    """Find `metadata = PluginMetadata(...)` class attributes (contract 1.0)."""
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self.records: list[MetadataRecord] = []
 
-    def visit_Call(self, node: ast.Call) -> None:
-        func_name = getattr(node.func, "id", None)
-        if func_name and func_name.startswith("build_") and func_name.endswith("_plugin_metadata"):
-            inferred_plugin_type = func_name.removeprefix("build_").removesuffix(
-                "_plugin_metadata"
-            )
-            self.records.append(
-                MetadataRecord(
-                    path=self.path,
-                    type_id=literal_string(keyword(node, "type_id")),
-                    plugin_type=inferred_plugin_type,
-                    supports_multiple_instances=literal_bool(
-                        keyword(node, "supports_multiple_instances")
-                    ),
-                    instance_label=literal_string(keyword(node, "instance_label")),
-                    common_config_schema=keyword(node, "common_config_schema")
-                    if isinstance(keyword(node, "common_config_schema"), ast.Dict)
-                    else None,
-                    instance_config_schema=keyword(node, "instance_config_schema")
-                    if isinstance(keyword(node, "instance_config_schema"), ast.Dict)
-                    else None,
-                    ui_actions=keyword(node, "ui_actions")
-                    if isinstance(keyword(node, "ui_actions"), ast.List)
-                    else None,
-                )
-            )
-        self.generic_visit(node)
+    @staticmethod
+    def _is_plugin_metadata_call(node: ast.AST | None) -> bool:
+        if not isinstance(node, ast.Call):
+            return False
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        return name == "PluginMetadata"
 
-    def visit_Dict(self, node: ast.Dict) -> None:
-        keys = {literal_string(k): v for k, v in zip(node.keys, node.values)}
-        if "type_id" in keys and "plugin_type" in keys:
+    @staticmethod
+    def _family_from_bases(class_node: ast.ClassDef) -> str | None:
+        for base in class_node.bases:
+            base_name = getattr(base, "id", None) or getattr(base, "attr", None)
+            if base_name in FAMILY_BASES:
+                return FAMILY_BASES[base_name]
+        return None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for statement in node.body:
+            if not isinstance(statement, ast.Assign):
+                continue
+            targets = [getattr(t, "id", None) for t in statement.targets]
+            if "metadata" not in targets or not self._is_plugin_metadata_call(statement.value):
+                continue
+            call = statement.value
             self.records.append(
                 MetadataRecord(
                     path=self.path,
-                    type_id=literal_string(keys.get("type_id")),
-                    plugin_type=literal_plugin_type(keys.get("plugin_type")),
+                    type_id=literal_string(keyword(call, "type_id")),
+                    plugin_type=self._family_from_bases(node),
                     supports_multiple_instances=literal_bool(
-                        keys.get("supports_multiple_instances")
+                        keyword(call, "supports_multiple_instances")
                     ),
-                    instance_label=literal_string(keys.get("instance_label")),
-                    common_config_schema=keys.get("common_config_schema")
-                    if isinstance(keys.get("common_config_schema"), ast.Dict)
+                    instance_label=literal_string(keyword(call, "instance_label")),
+                    common_config_schema=keyword(call, "common_config_schema")
+                    if isinstance(keyword(call, "common_config_schema"), ast.Dict)
                     else None,
-                    instance_config_schema=keys.get("instance_config_schema")
-                    if isinstance(keys.get("instance_config_schema"), ast.Dict)
+                    instance_config_schema=keyword(call, "instance_config_schema")
+                    if isinstance(keyword(call, "instance_config_schema"), ast.Dict)
                     else None,
-                    ui_actions=keys.get("ui_actions")
-                    if isinstance(keys.get("ui_actions"), ast.List)
+                    ui_actions=keyword(call, "ui_actions")
+                    if isinstance(keyword(call, "ui_actions"), ast.List)
+                    else None,
+                    display_schema=keyword(call, "display_schema")
+                    if isinstance(keyword(call, "display_schema"), ast.Dict)
+                    else None,
+                    statusbar_schema=keyword(call, "statusbar_schema")
+                    if isinstance(keyword(call, "statusbar_schema"), ast.Dict)
                     else None,
                 )
             )
@@ -196,6 +207,17 @@ def validate_actions(record: MetadataRecord) -> None:
             )
 
 
+def validate_display(record: MetadataRecord, schema_name: str, schema: ast.Dict | None) -> None:
+    if schema is None:
+        return
+    keys = {literal_string(k) for k in schema.keys}
+    legacy = sorted(k for k in keys if k in LEGACY_DISPLAY_KEYS)
+    if legacy:
+        record.errors.append(f"{schema_name} uses retired pre-1.0 keys: {', '.join(legacy)}")
+    if "kind" not in keys:
+        record.errors.append(f"{schema_name} must declare a kind")
+
+
 def validate_record(record: MetadataRecord) -> None:
     if not record.type_id:
         record.errors.append("metadata is missing literal type_id")
@@ -204,6 +226,8 @@ def validate_record(record: MetadataRecord) -> None:
 
     validate_schema(record, "common_config_schema", record.common_config_schema)
     validate_schema(record, "instance_config_schema", record.instance_config_schema)
+    validate_display(record, "display_schema", record.display_schema)
+    validate_display(record, "statusbar_schema", record.statusbar_schema)
     validate_actions(record)
 
 
@@ -252,18 +276,48 @@ def validate_plugin_manifest(plugin_py: Path) -> tuple[list[str], dict | None]:
             f"(expected one of {', '.join(sorted(VALID_PLUGIN_TYPES))})"
         )
 
-    format_version = manifest.get("format_version", SUPPORTED_FORMAT_VERSION)
-    if format_version != SUPPORTED_FORMAT_VERSION:
+    api_version = manifest.get("api_version")
+    if api_version is None:
         errors.append(
-            f"{display_path(manifest_path)}: unsupported format_version '{format_version}' "
-            f"(expected {SUPPORTED_FORMAT_VERSION})"
+            f"{display_path(manifest_path)}: missing required field 'api_version' "
+            f"(current: {SUPPORTED_API_VERSION})"
+        )
+    elif isinstance(api_version, bool) or api_version != SUPPORTED_API_VERSION:
+        errors.append(
+            f"{display_path(manifest_path)}: unsupported api_version '{api_version}' "
+            f"(expected {SUPPORTED_API_VERSION})"
         )
 
-    protocol_version = manifest.get("protocol_version", SUPPORTED_PROTOCOL_VERSION)
-    if protocol_version != SUPPORTED_PROTOCOL_VERSION:
+    for retired in ("format_version", "protocol_version"):
+        if retired in manifest:
+            errors.append(
+                f"{display_path(manifest_path)}: '{retired}' was retired in contract 1.0 "
+                "— declare api_version instead"
+            )
+    deps = manifest.get("dependencies")
+    if deps is not None:
+        if not isinstance(deps, dict):
+            errors.append(f"{display_path(manifest_path)}: dependencies must be an object")
+        else:
+            for retired_dep in ("python", "calvin"):
+                if retired_dep in deps:
+                    errors.append(
+                        f"{display_path(manifest_path)}: dependencies.{retired_dep} was retired "
+                        "in contract 1.0"
+                    )
+            packages = deps.get("packages")
+            if packages is not None and (
+                not isinstance(packages, list)
+                or not all(isinstance(pkg, str) and pkg.strip() for pkg in packages)
+            ):
+                errors.append(
+                    f"{display_path(manifest_path)}: dependencies.packages must be a list "
+                    "of pip requirement strings"
+                )
+    if "python_dependencies" in manifest:
         errors.append(
-            f"{display_path(manifest_path)}: unsupported protocol_version '{protocol_version}' "
-            f"(expected {SUPPORTED_PROTOCOL_VERSION})"
+            f"{display_path(manifest_path)}: 'python_dependencies' was retired in contract 1.0 "
+            "— use dependencies.packages"
         )
 
     return errors, manifest
