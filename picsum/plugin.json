@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "picsum",
   "name": "Picsum Photos",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "image",
   "description": "Random high-quality images from Picsum Photos (no API key required)",
   "author": "Calvin Team",
@@ -16,10 +15,6 @@
     "picsum",
     "random"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
-  },
   "files": {
     "include": [
       "plugin.py",
@@ -32,7 +27,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }

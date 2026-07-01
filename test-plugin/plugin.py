@@ -1,182 +1,55 @@
-"""Test plugin for plugin installation testing."""
+"""Test plugin for plugin installation testing.
+
+The smallest legal service plugin under the Calvin plugin contract 1.0: one
+declarative class, one config field, a `status` display schema, a `status`
+statusbar schema (so it also exercises the statusbar namespace), and `fetch()`
+as the single data verb. Used by the host's install/contract tests.
+"""
 
 from typing import Any
 
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ServicePlugin
-from app.plugins.sdk.service import (
-    ServiceConfigField,
-    build_service_manager_config,
-    build_service_plugin_metadata,
-    create_service_plugin_instance,
-)
-from app.plugins.utils.config import extract_config_value, to_str
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
-
-
-SERVICE_FIELDS = (
-    ServiceConfigField("message", default="Hello from test plugin!", converter=to_str),
-)
 
 
 class TestServicePlugin(ServicePlugin):
     """Test service plugin for installation testing."""
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return build_service_plugin_metadata(
-            type_id="test_plugin",
-            name="Test Plugin",
-            description="A basic test plugin for plugin installation testing",
-            plugin_class=cls,
-            supports_multiple_instances=False,
-            common_config_schema={
-                "message": {
-                    "type": "string",
-                    "description": "Test message to display",
-                    "default": "Hello from test plugin!",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "Enter a message",
-                        "validation": {
-                            "required": False,
-                        },
-                    },
+    metadata = PluginMetadata(
+        type_id="test_plugin",
+        name="Test Plugin",
+        description="A basic test plugin for plugin installation testing",
+        supports_multiple_instances=False,
+        fixed_instance_id="test-plugin-instance",
+        default_instance_name="Test Plugin",
+        instance_config_schema={
+            "message": {
+                "type": "string",
+                "description": "Test message to display",
+                "default": "test plugin OK",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "Enter a message",
                 },
             },
-            display_schema={
-                "type": "api",
-                "api_endpoint": None,
-                "method": None,
-                "data_schema": None,
-                "render_template": "iframe",
-            },
-        )
+        },
+        display_schema={
+            "kind": "status",
+            "item": {"label": "Test", "value_path": "$.message"},
+        },
+        statusbar_schema={
+            "kind": "status",
+            "item": {"label": "Test", "value_path": "$.message"},
+        },
+    )
 
-    def __init__(
+    async def fetch(
         self,
-        plugin_id: str,
-        name: str,
-        message: str = "Hello from test plugin!",
-        enabled: bool = True,
-    ):
-        """
-        Initialize test service plugin.
-
-        Args:
-            plugin_id: Unique identifier for the plugin
-            name: Human-readable name
-            message: Test message to display
-            enabled: Whether the plugin is enabled
-        """
-        super().__init__(plugin_id, name, enabled)
-        self.message = message
-
-    async def initialize(self) -> None:
-        """Initialize the plugin."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup plugin resources."""
-        pass
-
-    async def get_content(self) -> dict[str, Any]:
-        """
-        Get service content for display.
-
-        Returns:
-            Dictionary with content information
-        """
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the payload the status schemas bind to."""
         return {
-            "type": "iframe",
-            "url": "about:blank",
-            "config": {
-                "message": self.message,
-            },
+            "message": self.config.get("message") or "test plugin OK",
+            "plugin_id": self.plugin_id,
         }
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        """
-        Validate plugin configuration.
-
-        Args:
-            config: Configuration dictionary
-
-        Returns:
-            True if configuration is valid
-        """
-        # Accept any configuration for testing purposes
-        # Message is optional and can be any string
-        if "message" in config:
-            message = extract_config_value(
-                config, "message", default="Hello from test plugin!", converter=to_str
-            )
-            if message and not isinstance(message, str):
-                return False
-        return True
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        """
-        Configure the plugin with settings.
-
-        Args:
-            config: Configuration dictionary
-        """
-        await super().configure(config)
-
-        if "message" in config:
-            self.message = extract_config_value(
-                config, "message", default="Hello from test plugin!", converter=to_str
-            )
-
-
-# Register this plugin with pluggy
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    """Register TestServicePlugin type."""
-    return [TestServicePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> TestServicePlugin | None:
-    """Create a TestServicePlugin instance."""
-    return create_service_plugin_instance(
-        TestServicePlugin,
-        expected_type_id="test_plugin",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=SERVICE_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    """Handle Test Plugin configuration update and instance management."""
-    if type_id != "test_plugin":
-        return None
-
-    manager_config = build_service_manager_config(
-        type_id="test_plugin",
-        fields=SERVICE_FIELDS,
-        single_instance=True,
-        instance_id="test-plugin-instance",
-        default_instance_name="Test Plugin",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

@@ -1,35 +1,20 @@
-"""Image Processor backend plugin - processes images when uploaded via events."""
+"""Image Processor backend plugin - processes images when uploaded via events.
+
+Plugin contract 1.0: one declarative class with `metadata = PluginMetadata(...)`,
+config declared once in `metadata.instance_config_schema` and read from
+`self.config`. The event-driven surface (`get_subscribed_events` /
+`handle_event`) and the service-provider surface (`provide_service` /
+`get_provided_services`) are unchanged.
+"""
 
 import asyncio
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from app.plugins.base import PluginType
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import BackendPlugin
-from app.plugins.sdk.backend import (
-    BackendConfigField,
-    build_backend_manager_config,
-    build_backend_plugin_metadata,
-    create_backend_plugin_instance,
-)
-from app.plugins.utils.config import extract_config_value, to_bool, to_int
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
-
-# Loguru automatically includes module/function info in logs
-
-
-BACKEND_FIELDS = (
-    BackendConfigField("processing_enabled", default=True, converter=to_bool),
-    BackendConfigField("resize_enabled", default=True, converter=to_bool),
-    BackendConfigField("max_width", default=1920, converter=to_int),
-    BackendConfigField("max_height", default=1080, converter=to_int),
-    BackendConfigField("generate_thumbnails", default=True, converter=to_bool),
-    BackendConfigField("thumbnail_size", default=300, converter=to_int),
-)
 
 
 class ImageProcessorPlugin(BackendPlugin):
@@ -46,79 +31,83 @@ class ImageProcessorPlugin(BackendPlugin):
     3. Emit custom events for other plugins
     """
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return build_backend_plugin_metadata(
-            type_id="image-processor",
-            name="Image Processor",
-            description="Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
-            plugin_class=cls,
-            supports_multiple_instances=True,
-            instance_label="Processor",
-            common_config_schema={},
-            instance_config_schema={
-                "processing_enabled": {
-                    "type": "boolean",
-                    "description": "Enable image processing",
-                    "default": True,
-                },
-                "resize_enabled": {
-                    "type": "boolean",
-                    "description": "Resize large images",
-                    "default": True,
-                },
-                "max_width": {
-                    "type": "integer",
-                    "description": "Maximum image width in pixels",
-                    "default": 1920,
-                    "ui": {
-                        "component": "input",
-                        "type": "number",
-                        "min": 100,
-                        "max": 10000,
-                    },
-                },
-                "max_height": {
-                    "type": "integer",
-                    "description": "Maximum image height in pixels",
-                    "default": 1080,
-                    "ui": {
-                        "component": "input",
-                        "type": "number",
-                        "min": 100,
-                        "max": 10000,
-                    },
-                },
-                "generate_thumbnails": {
-                    "type": "boolean",
-                    "description": "Generate thumbnail versions",
-                    "default": True,
-                },
-                "thumbnail_size": {
-                    "type": "integer",
-                    "description": "Thumbnail size in pixels",
-                    "default": 300,
-                    "ui": {
-                        "component": "input",
-                        "type": "number",
-                        "min": 50,
-                        "max": 1000,
-                    },
+    metadata = PluginMetadata(
+        type_id="image-processor",
+        name="Image Processor",
+        description=(
+            "Automatically processes images when uploaded (resize, optimize, "
+            "generate thumbnails). Demonstrates event system usage."
+        ),
+        default_instance_name="Image Processor",
+        instance_label="Processor",
+        # Same processing settings -> same instance
+        instance_identity=["max_width", "max_height", "thumbnail_size"],
+        instance_config_schema={
+            "processing_enabled": {
+                "type": "boolean",
+                "description": "Enable image processing",
+                "default": True,
+            },
+            "resize_enabled": {
+                "type": "boolean",
+                "description": "Resize large images",
+                "default": True,
+            },
+            "max_width": {
+                "type": "integer",
+                "description": "Maximum image width in pixels",
+                "default": 1920,
+                "ui": {
+                    "component": "input",
+                    "type": "number",
+                    "min": 100,
+                    "max": 10000,
                 },
             },
-        )
+            "max_height": {
+                "type": "integer",
+                "description": "Maximum image height in pixels",
+                "default": 1080,
+                "ui": {
+                    "component": "input",
+                    "type": "number",
+                    "min": 100,
+                    "max": 10000,
+                },
+            },
+            "generate_thumbnails": {
+                "type": "boolean",
+                "description": "Generate thumbnail versions",
+                "default": True,
+            },
+            "thumbnail_size": {
+                "type": "integer",
+                "description": "Thumbnail size in pixels",
+                "default": 300,
+                "ui": {
+                    "component": "input",
+                    "type": "number",
+                    "min": 50,
+                    "max": 1000,
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "instance",
+            },
+        ],
+    )
 
     def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         """Initialize image processor plugin."""
         super().__init__(plugin_id, name, enabled)
         self._processed_count = 0
         self._error_count = 0
-
-    @property
-    def plugin_type(self) -> PluginType:
-        """Return backend plugin type."""
-        return PluginType.BACKEND
 
     async def initialize(self) -> None:
         """Initialize the plugin."""
@@ -133,33 +122,21 @@ class ImageProcessorPlugin(BackendPlugin):
             f"Processed {self._processed_count} images, {self._error_count} errors"
         )
 
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin configuration."""
-        # Check that max dimensions are positive
-        max_width = extract_config_value(config, "max_width", default=1920, converter=to_int)
-        max_height = extract_config_value(config, "max_height", default=1080, converter=to_int)
-        if max_width <= 0 or max_height <= 0:
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require positive dimensions; positive thumbnail size when enabled."""
+        normalized = cls.normalize_config(config)
+        if int(normalized.get("max_width") or 0) <= 0:
             return False
-
-        # Check thumbnail size if enabled
-        generate_thumbnails = extract_config_value(config, "generate_thumbnails", default=True, converter=to_bool)
-        if generate_thumbnails:
-            thumbnail_size = extract_config_value(config, "thumbnail_size", default=300, converter=to_int)
-            if thumbnail_size <= 0:
-                return False
-
+        if int(normalized.get("max_height") or 0) <= 0:
+            return False
+        if normalized.get("generate_thumbnails") and int(normalized.get("thumbnail_size") or 0) <= 0:
+            return False
         return True
 
-    async def configure(self, config: dict[str, Any]) -> None:
-        """
-        Configure the plugin with settings.
-
-        Args:
-            config: Configuration dictionary
-        """
-        await super().configure(config)
-        # Configuration is stored via get_config() from the base class
-        # Individual values are extracted when needed in _handle_image_uploaded
+    # ------------------------------------------------------------------
+    # Event handling
+    # ------------------------------------------------------------------
 
     async def get_subscribed_events(self) -> list[str]:
         """Return list of event types this plugin subscribes to."""
@@ -223,7 +200,10 @@ class ImageProcessorPlugin(BackendPlugin):
 
             if config.get("generate_thumbnails", True):
                 thumbnail_size = config.get("thumbnail_size", 300)
-                logger.debug(f"Image Processor: Would generate thumbnail for {filename} ({thumbnail_size}x{thumbnail_size})")
+                logger.debug(
+                    f"Image Processor: Would generate thumbnail for {filename} "
+                    f"({thumbnail_size}x{thumbnail_size})"
+                )
                 processing_results["thumbnail_generated"] = True
                 processing_results["thumbnail_size"] = thumbnail_size
 
@@ -272,6 +252,10 @@ class ImageProcessorPlugin(BackendPlugin):
 
             return {"success": False, "error": str(e)}
 
+    # ------------------------------------------------------------------
+    # Service provider
+    # ------------------------------------------------------------------
+
     async def get_processing_stats(self) -> dict[str, Any]:
         """Get processing statistics (example of providing a service to other plugins)."""
         return {
@@ -289,62 +273,3 @@ class ImageProcessorPlugin(BackendPlugin):
     async def get_provided_services(self) -> list[str]:
         """Return list of services this plugin provides."""
         return ["get_processing_stats"]
-
-
-# Pluggy hooks for plugin registration
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    """Register image processor plugin type."""
-    return [ImageProcessorPlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> BackendPlugin | None:
-    """Create an image processor plugin instance."""
-    return create_backend_plugin_instance(
-        ImageProcessorPlugin,
-        expected_type_id="image-processor",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=BACKEND_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    """Handle Image Processor plugin configuration update and instance management."""
-    if type_id != "image-processor":
-        return None
-
-    def generate_instance_id(c: dict[str, Any], t_id: str) -> str:
-        """Generate instance ID from config values."""
-        # Create a hash from config to generate unique ID
-        # For image-processor, we could use a combination of settings
-        config_str = f"{c.get('max_width', 1920)}_{c.get('max_height', 1080)}_{c.get('thumbnail_size', 300)}"
-        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
-        return f"{t_id}-{config_hash}"
-
-    manager_config = build_backend_manager_config(
-        type_id="image-processor",
-        fields=BACKEND_FIELDS,
-        single_instance=False,  # Multi-instance plugin
-        generate_instance_id=generate_instance_id,
-        default_instance_name="Image Processor",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

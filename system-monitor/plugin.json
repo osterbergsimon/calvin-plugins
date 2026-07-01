@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "system_monitor",
   "name": "System Monitor",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "service",
   "description": "Live system metrics — CPU, memory, disk, temperature and network. Optimised for Raspberry Pi.",
   "author": "Calvin Team",
@@ -18,19 +17,15 @@
     "memory",
     "raspberry-pi"
   ],
-  "python_dependencies": [
-    "psutil>=5.9"
-  ],
   "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
+    "packages": [
+      "psutil>=5.9"
+    ]
   },
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json",
-      "frontend/SystemMonitor.vue",
-      "frontend/SystemStatusbar.vue"
+      "plugin.json"
     ],
     "exclude": [
       "*.md",
@@ -39,7 +34,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }

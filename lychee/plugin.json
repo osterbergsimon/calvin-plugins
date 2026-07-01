@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "lychee",
   "name": "Lychee",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "image",
   "description": "Photos from your self-hosted Lychee photo gallery",
   "author": "Calvin Team",
@@ -17,10 +16,6 @@
     "self-hosted",
     "gallery"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
-  },
   "files": {
     "include": [
       "plugin.py",
@@ -33,7 +28,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": true
   }
 }

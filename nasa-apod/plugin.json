@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "nasa_apod",
   "name": "NASA APOD",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "image",
   "description": "Astronomy Picture of the Day from NASA — daily curated space images with titles and descriptions",
   "author": "Calvin Team",
@@ -18,10 +17,6 @@
     "astronomy",
     "apod"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
-  },
   "files": {
     "include": [
       "plugin.py",
@@ -34,7 +29,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }

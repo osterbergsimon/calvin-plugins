@@ -1,4 +1,9 @@
-"""NASA Astronomy Picture of the Day (APOD) image plugin."""
+"""NASA Astronomy Picture of the Day (APOD) image plugin (plugin contract 1.0).
+
+One declarative class: config is declared once in
+`metadata.instance_config_schema` and the loader discovers the class. This is
+a single-instance plugin — there is exactly one APOD feed.
+"""
 
 from datetime import datetime
 from typing import Any
@@ -6,17 +11,9 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ImagePlugin
-from app.plugins.sdk.image import (
-    ImageConfigField,
-    build_image_manager_config,
-    build_image_plugin_metadata,
-    create_image_plugin_instance,
-    fetch_image_data,
-)
-from app.plugins.utils.config import extract_config_value, to_int, to_str
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
+from app.plugins.sdk.image import fetch_image_data
 from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _APOD_URL = "https://api.nasa.gov/planetary/apod"
@@ -24,66 +21,53 @@ _DEMO_KEY = "DEMO_KEY"
 _SCAN_INTERVAL = 86400  # Refresh once per day
 
 
-IMAGE_FIELDS = (
-    ImageConfigField(
-        "api_key",
-        default="",
-        converter=to_str,
-        transform=lambda value: value.strip() if value else "",
-    ),
-    ImageConfigField("count", default=20, converter=to_int),
-)
-
-
 class NasaApodImagePlugin(ImagePlugin):
     """NASA Astronomy Picture of the Day image plugin."""
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        return build_image_plugin_metadata(
-            type_id="nasa_apod",
-            name="NASA APOD",
-            description="Astronomy Picture of the Day from NASA",
-            plugin_class=cls,
-            supports_multiple_instances=False,
-            common_config_schema={
-                "api_key": {
-                    "type": "string",
-                    "description": "NASA API key (leave blank to use the free DEMO_KEY)",
-                    "default": "",
-                    "ui": {
-                        "component": "text",
-                        "placeholder": "Optional — get a free key at api.nasa.gov",
-                    },
-                },
-                "count": {
-                    "type": "string",
-                    "description": "Number of random APOD images to fetch (1–100)",
-                    "default": "20",
-                    "ui": {
-                        "component": "number",
-                        "min": 1,
-                        "max": 100,
-                        "placeholder": "20",
-                    },
+    metadata = PluginMetadata(
+        type_id="nasa_apod",
+        name="NASA APOD",
+        description="Astronomy Picture of the Day from NASA",
+        default_instance_name="NASA APOD",
+        supports_multiple_instances=False,
+        fixed_instance_id="nasa-apod-instance",
+        instance_config_schema={
+            "api_key": {
+                "type": "string",
+                "description": "NASA API key (leave blank to use the free DEMO_KEY)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "Optional — get a free key at api.nasa.gov",
                 },
             },
-            instance_config_schema={},
-        )
+            "count": {
+                "type": "integer",
+                "description": "Number of random APOD images to fetch (1–100)",
+                "default": 20,
+                "ui": {
+                    "component": "number",
+                    "placeholder": "20",
+                    "validation": {"min": 1, "max": 100},
+                },
+            },
+        },
+    )
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        api_key: str = "",
-        count: int = 20,
-        enabled: bool = True,
-    ):
+    def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         super().__init__(plugin_id, name, enabled)
-        self.api_key = api_key or _DEMO_KEY
-        self.count = count
         self._images: list[dict[str, Any]] = []
         self._last_scan: datetime | None = None
+
+    # Config accessors — values live in self.config (schema-normalized).
+
+    @property
+    def api_key(self) -> str:
+        return str(self.config.get("api_key") or "").strip() or _DEMO_KEY
+
+    @property
+    def count(self) -> int:
+        return min(int(self.config.get("count") or 20), 100)
 
     async def initialize(self) -> None:
         # Restore scan results from disk so a restart doesn't re-hit the API
@@ -93,8 +77,35 @@ class NasaApodImagePlugin(ImagePlugin):
             self._last_scan = cached_time
         await self.scan_images()
 
-    async def cleanup(self) -> None:
-        pass
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration and force a refresh on next access."""
+        await super().configure(config)
+        self._last_scan = None
+
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Bound count; the API key is optional (DEMO_KEY fallback)."""
+        normalized = cls.normalize_config(config)
+        count = normalized.get("count")
+        count = 20 if count is None else int(count)
+        return 1 <= count <= 100
+
+    @classmethod
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """Fetch one APOD entry with the configured (or demo) API key."""
+        normalized = cls.normalize_config(config)
+        api_key = str(normalized.get("api_key") or "").strip() or _DEMO_KEY
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(_APOD_URL, params={"api_key": api_key, "count": 1})
+            if response.status_code == 200:
+                return {"success": True, "message": "Connected to the NASA APOD API."}
+            return {
+                "success": False,
+                "message": f"NASA APOD API returned HTTP {response.status_code}. Check the API key.",
+            }
+        except httpx.HTTPError as e:
+            return {"success": False, "message": f"Could not reach the NASA APOD API: {e}"}
 
     async def get_images(self) -> list[dict[str, Any]]:
         await self.scan_images()
@@ -180,70 +191,3 @@ class NasaApodImagePlugin(ImagePlugin):
         except Exception as e:
             logger.exception(f"[NASA APOD] Unexpected error scanning images: {e}")
             return self._images.copy()
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        count = extract_config_value(config, "count", default=20, converter=to_int)
-        if not (1 <= count <= 100):
-            return False
-        api_key = extract_config_value(config, "api_key", default="", converter=to_str) or _DEMO_KEY
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    _APOD_URL, params={"api_key": api_key, "count": 1}
-                )
-                return response.status_code == 200
-        except httpx.HTTPError:
-            return False
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        await super().configure(config)
-        self.api_key = extract_config_value(config, "api_key", default="", converter=to_str) or _DEMO_KEY
-        self.count = min(extract_config_value(config, "count", default=20, converter=to_int), 100)
-        self._last_scan = None  # force refresh on next access
-
-
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    return [NasaApodImagePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> NasaApodImagePlugin | None:
-    return create_image_plugin_instance(
-        NasaApodImagePlugin,
-        expected_type_id="nasa_apod",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=IMAGE_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    if type_id != "nasa_apod":
-        return None
-
-    manager_config = build_image_manager_config(
-        type_id="nasa_apod",
-        fields=IMAGE_FIELDS,
-        single_instance=True,
-        instance_id="nasa-apod-instance",
-        default_instance_name="NASA APOD",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

@@ -1,447 +1,235 @@
-"""Tests for Unsplash plugin.
+"""Tests for the Unsplash plugin (plugin contract 1.0).
 
-These tests should be run from the backend directory:
-    cd backend
-    pytest ../calvin-plugins/unsplash/test_unsplash.py
+Run from the calvin backend directory so `app.*` imports resolve:
+    cd calvin/backend
+    uv run pytest ../../calvin-plugins/unsplash/test_unsplash.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import importlib.util
+import types
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import httpx
+import pytest
 
-# Note: These tests assume the plugin is installed and the backend imports are available
-# In a real scenario, you'd run these tests in the calvin backend context
 try:
-    from app.plugins.base import PluginType
-    from app.plugins.hooks import hookimpl
+    from app.plugins.definitions import PluginMetadata
+    from app.plugins.loader import PluginLoader
     from app.plugins.protocols import ImagePlugin
-    from app.plugins.utils.config import extract_config_value, to_int, to_str
-    from app.plugins.utils.instance_manager import (
-        InstanceManagerConfig,
-        handle_plugin_config_update_generic,
-    )
-    
-    # Import the plugin
-    import sys
-    from pathlib import Path
-    plugin_path = Path(__file__).parent / "plugin.py"
-    if plugin_path.exists():
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("unsplash_plugin", plugin_path)
-        if spec and spec.loader:
-            unsplash_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(unsplash_module)
-            UnsplashImagePlugin = unsplash_module.UnsplashImagePlugin
-        else:
-            pytest.skip("Could not load unsplash plugin module", allow_module_level=True)
-    else:
-        pytest.skip("unsplash plugin.py not found", allow_module_level=True)
-except ImportError as e:
+except ImportError as e:  # pragma: no cover
     pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
 
 
+def _load_plugin_module():
+    plugin_path = Path(__file__).parent / "plugin.py"
+    spec = importlib.util.spec_from_file_location("unsplash_plugin_under_test", plugin_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+unsplash_module = _load_plugin_module()
+UnsplashImagePlugin = unsplash_module.UnsplashImagePlugin
+
+
 @pytest.fixture
-def unsplash_plugin():
-    """Create an UnsplashImagePlugin instance."""
-    return UnsplashImagePlugin(
-        plugin_id="unsplash-instance",
-        name="Unsplash",
-        api_key="test-api-key",
-        category="popular",
-        count=30,
-        enabled=True,
+async def plugin(monkeypatch):
+    """A configured plugin instance (scan cache disabled)."""
+    monkeypatch.setattr(unsplash_module, "save_scan_cache", lambda *a, **k: None)
+    instance = UnsplashImagePlugin(plugin_id="unsplash-instance", name="Unsplash", enabled=True)
+    await instance.configure(
+        {"api_key": " test-api-key ", "category": "popular", "count": "30"}
     )
+    return instance
 
 
-class TestUnsplashImagePlugin:
-    """Tests for UnsplashImagePlugin class."""
+class TestContractShape:
+    """The plugin conforms to contract 1.0: one class, declarative metadata."""
 
-    def test_get_plugin_metadata(self):
-        """Test plugin metadata."""
-        metadata = UnsplashImagePlugin.get_plugin_metadata()
-        assert metadata["type_id"] == "unsplash"
-        assert metadata["plugin_type"] == PluginType.IMAGE
-        assert metadata["name"] == "Unsplash"
-        assert metadata["supports_multiple_instances"] is False
-        assert "common_config_schema" in metadata
-        assert "api_key" in metadata["common_config_schema"]
-        assert "category" in metadata["common_config_schema"]
-        assert "count" in metadata["common_config_schema"]
+    def test_discoverable_by_loader(self):
+        loader = PluginLoader()
+        module = types.ModuleType("installed_plugin_unsplash")
+        module.UnsplashImagePlugin = UnsplashImagePlugin
+        assert loader.register_module(module) == ["unsplash"]
 
-    def test_init(self, unsplash_plugin):
-        """Test plugin initialization."""
-        assert unsplash_plugin.plugin_id == "unsplash-instance"
-        assert unsplash_plugin.name == "Unsplash"
-        assert unsplash_plugin.api_key == "test-api-key"
-        assert unsplash_plugin.category == "popular"
-        assert unsplash_plugin.count == 30
-        assert unsplash_plugin.enabled is True
-        assert unsplash_plugin.base_url == "https://api.unsplash.com"
+    def test_no_module_level_hooks(self):
+        for hook in (
+            "register_plugin_types",
+            "create_plugin_instance",
+            "handle_plugin_config_update",
+        ):
+            assert not hasattr(unsplash_module, hook), hook
 
-    def test_init_without_api_key(self):
-        """Test plugin initialization without API key."""
-        plugin = UnsplashImagePlugin(
-            plugin_id="unsplash-instance",
-            name="Unsplash",
-            api_key=None,
-            category="latest",
-            count=50,
-            enabled=False,
-        )
+    def test_metadata(self):
+        md = UnsplashImagePlugin.metadata
+        assert isinstance(md, PluginMetadata)
+        assert md.type_id == "unsplash"
+        assert md.supports_multiple_instances is False
+        assert md.fixed_instance_id == "unsplash-instance"  # preserved pre-2.0 instance id
+        required = {
+            key
+            for key, field in md.instance_config_schema.items()
+            if (field.get("ui") or {}).get("validation", {}).get("required")
+        }
+        assert required == {"api_key"}
+
+    def test_single_instance_has_no_config_derived_id(self):
+        assert UnsplashImagePlugin.instance_id_for({"api_key": "x"}) is None
+
+    def test_is_image_plugin(self):
+        assert issubclass(UnsplashImagePlugin, ImagePlugin)
+
+
+class TestConfig:
+    async def test_config_normalization_and_accessors(self, plugin):
+        assert plugin.api_key == "test-api-key"  # whitespace trimmed
+        assert plugin.category == "popular"
+        assert plugin.count == 30  # "30" converted by schema type
+
+    async def test_blank_api_key_becomes_none(self, plugin):
+        await plugin.configure({"api_key": "   ", "category": "popular", "count": 30})
         assert plugin.api_key is None
-        assert plugin.category == "latest"
-        assert plugin.count == 50
-        assert plugin.enabled is False
 
-    @pytest.mark.asyncio
-    async def test_scan_images_success(self, unsplash_plugin):
-        """Test scanning images successfully."""
+    async def test_count_capped_at_api_limit(self, plugin):
+        await plugin.configure({"api_key": "k", "count": 500})
+        assert plugin.count == 100
+
+    async def test_validate_config(self):
+        good = {"api_key": "k", "category": "popular", "count": 30}
+        assert await UnsplashImagePlugin.validate_config(good) is True
+        assert await UnsplashImagePlugin.validate_config({**good, "api_key": ""}) is False
+        assert await UnsplashImagePlugin.validate_config({**good, "category": "weird"}) is False
+        assert await UnsplashImagePlugin.validate_config({**good, "count": 0}) is False
+        assert await UnsplashImagePlugin.validate_config({**good, "count": 101}) is False
+
+    async def test_configure_forces_rescan(self, plugin):
+        plugin._last_scan = datetime.now()
+        await plugin.configure({"api_key": "k", "count": 10})
+        assert plugin._last_scan is None
+
+
+class TestScan:
+    async def test_scan_parses_photos_and_sends_auth(self, plugin):
         mock_photos = [
             {
-                "id": "photo1",
-                "description": "Test photo",
-                "width": 1920,
-                "height": 1080,
+                "id": "abc123",
+                "width": 4000,
+                "height": 3000,
+                "description": "A sunset",
+                "alt_description": "Sunset over hills",
+                "created_at": "2026-01-01T00:00:00Z",
                 "urls": {
-                    "regular": "https://images.unsplash.com/photo1-regular",
-                    "raw": "https://images.unsplash.com/photo1-raw",
+                    "regular": "https://images.unsplash.com/abc123?w=1080",
+                    "raw": "https://images.unsplash.com/abc123",
                 },
                 "user": {
-                    "name": "John Doe",
-                    "links": {"html": "https://unsplash.com/@johndoe"},
+                    "name": "Jane Doe",
+                    "links": {"html": "https://unsplash.com/@jane"},
                 },
-                "created_at": "2024-01-01T00:00:00Z",
-            },
-            {
-                "id": "photo2",
-                "alt_description": "Another test photo",
-                "width": 1920,
-                "height": 1080,
-                "urls": {
-                    "regular": "https://images.unsplash.com/photo2-regular",
-                    "raw": "https://images.unsplash.com/photo2-raw",
-                },
-                "user": {
-                    "name": "Jane Smith",
-                    "links": {"html": "https://unsplash.com/@janesmith"},
-                },
-                "created_at": "2024-01-02T00:00:00Z",
-            },
-        ]
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_photos
-            mock_response.raise_for_status = MagicMock()
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
-            images = await unsplash_plugin.scan_images()
-
-            assert len(images) <= unsplash_plugin.count
-            if len(images) > 0:
-                assert images[0]["id"] == "unsplash-photo1"
-                assert images[0]["source"] == "unsplash-instance"
-                assert images[0]["photographer"] == "John Doe"
-                assert images[0]["raw_url"] == "https://images.unsplash.com/photo1-raw"
-
-    @pytest.mark.asyncio
-    async def test_scan_images_with_api_key(self, unsplash_plugin):
-        """Test scanning images with API key in headers."""
-        mock_photos = [
-            {
-                "id": "photo1",
-                "width": 1920,
-                "height": 1080,
-                "urls": {"regular": "https://example.com/photo.jpg", "raw": "https://example.com/photo-raw.jpg"},
-                "user": {"name": "Test User", "links": {}},
-                "created_at": "2024-01-01T00:00:00Z",
             }
         ]
+        response = MagicMock()
+        response.json.return_value = mock_photos
+        response.raise_for_status = MagicMock()
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
 
         with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_photos
-            mock_response.raise_for_status = MagicMock()
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
+            mock_client.return_value.__aenter__.return_value = client
+            images = await plugin.scan_images()
 
-            await unsplash_plugin.scan_images()
+        assert [img["id"] for img in images] == ["unsplash-abc123"]
+        image = images[0]
+        assert image["url"] == "https://images.unsplash.com/abc123?w=1080"
+        assert image["raw_url"] == "https://images.unsplash.com/abc123"
+        assert image["title"] == "A sunset"
+        assert image["photographer"] == "Jane Doe"
+        assert image["photographer_url"] == "https://unsplash.com/@jane"
+        assert image["source"] == "unsplash-instance"
 
-            # Verify Authorization header was added
-            call_args = mock_client.return_value.__aenter__.return_value.get.call_args
-            headers = call_args.kwargs.get("headers", {})
-            assert "Authorization" in headers
-            assert headers["Authorization"] == "Client-ID test-api-key"
+        _, kwargs = client.get.await_args
+        assert kwargs["headers"]["Authorization"] == "Client-ID test-api-key"
+        assert kwargs["params"] == {"per_page": 30, "order_by": "popular"}
 
-    @pytest.mark.asyncio
-    async def test_scan_images_without_api_key(self):
-        """Test scanning images without API key (should still work but with warnings)."""
-        plugin = UnsplashImagePlugin(
-            plugin_id="unsplash-instance",
-            name="Unsplash",
-            api_key=None,
-            enabled=True,
-        )
-
-        mock_photos = [
-            {
-                "id": "photo1",
-                "width": 1920,
-                "height": 1080,
-                "urls": {"regular": "https://example.com/photo.jpg", "raw": "https://example.com/photo-raw.jpg"},
-                "user": {"name": "Test User", "links": {}},
-                "created_at": "2024-01-01T00:00:00Z",
-            }
-        ]
+    async def test_scan_without_api_key_sends_no_auth_header(self, plugin):
+        await plugin.configure({"api_key": "", "category": "latest", "count": 5})
+        response = MagicMock()
+        response.json.return_value = []
+        response.raise_for_status = MagicMock()
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
 
         with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_photos
-            mock_response.raise_for_status = MagicMock()
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
+            mock_client.return_value.__aenter__.return_value = client
             await plugin.scan_images()
 
-            # Verify no Authorization header when API key is None
-            call_args = mock_client.return_value.__aenter__.return_value.get.call_args
-            headers = call_args.kwargs.get("headers", {})
-            assert "Authorization" not in headers
+        _, kwargs = client.get.await_args
+        assert "Authorization" not in kwargs["headers"]
+        assert kwargs["params"] == {"per_page": 5, "order_by": "latest"}
 
-    @pytest.mark.asyncio
-    async def test_scan_images_with_caching(self, unsplash_plugin):
-        """Test that scan_images caches results."""
-        mock_photos = [
+    async def test_scan_uses_cache_within_interval(self, plugin):
+        response = MagicMock()
+        response.json.return_value = []
+        response.raise_for_status = MagicMock()
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value = client
+            await plugin.scan_images()
+            await plugin.scan_images()
+
+        assert client.get.await_count == 1
+
+    async def test_scan_keeps_cached_images_on_http_error(self, plugin):
+        plugin._images = [{"id": "unsplash-old"}]
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=httpx.ConnectError("offline"))
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value = client
+            images = await plugin.scan_images()
+
+        assert images == [{"id": "unsplash-old"}]
+
+
+class TestImageAccess:
+    async def test_get_image_and_missing_image(self, plugin):
+        plugin._images = [
+            {"id": "unsplash-1", "url": "https://example.com/1.jpg"},
+            {"id": "unsplash-2", "url": "https://example.com/2.jpg"},
+        ]
+        plugin._last_scan = datetime.now()
+
+        image = await plugin.get_image("unsplash-2")
+        assert image["id"] == "unsplash-2"
+        assert await plugin.get_image("unsplash-nope") is None
+
+    async def test_get_image_data_prefers_raw_url(self, plugin):
+        plugin._images = [
             {
-                "id": "photo1",
-                "width": 1920,
-                "height": 1080,
-                "urls": {"regular": "https://example.com/photo.jpg", "raw": "https://example.com/photo-raw.jpg"},
-                "user": {"name": "Test User", "links": {}},
-                "created_at": "2024-01-01T00:00:00Z",
+                "id": "unsplash-1",
+                "url": "https://example.com/regular.jpg",
+                "raw_url": "https://example.com/raw.jpg",
             }
         ]
+        plugin._last_scan = datetime.now()
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_photos
-            mock_response.raise_for_status = MagicMock()
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
+        with patch.object(
+            unsplash_module, "fetch_image_data", new_callable=AsyncMock
+        ) as mock_fetch:
+            mock_fetch.return_value = b"image-data"
+            data = await plugin.get_image_data("unsplash-1")
 
-            # First scan
-            images1 = await unsplash_plugin.scan_images()
-            # Second scan should use cache
-            images2 = await unsplash_plugin.scan_images()
+        assert data == b"image-data"
+        mock_fetch.assert_awaited_once_with(
+            "https://example.com/raw.jpg",
+            plugin_name="Unsplash",
+        )
 
-            # Should only call API once (cached on second call)
-            assert mock_client.return_value.__aenter__.return_value.get.call_count <= 1
-
-    @pytest.mark.asyncio
-    async def test_scan_images_http_error_401(self, unsplash_plugin):
-        """Test handling of 401 (authentication) error."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "Unauthorized",
-                request=MagicMock(),
-                response=MagicMock(status_code=401),
-            )
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
-            # Should return cached images or empty list
-            images = await unsplash_plugin.scan_images()
-            assert isinstance(images, list)
-
-    @pytest.mark.asyncio
-    async def test_scan_images_http_error_403(self, unsplash_plugin):
-        """Test handling of 403 (forbidden) error."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "Forbidden",
-                request=MagicMock(),
-                response=MagicMock(status_code=403),
-            )
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
-            # Should return cached images or empty list
-            images = await unsplash_plugin.scan_images()
-            assert isinstance(images, list)
-
-    @pytest.mark.asyncio
-    async def test_get_images(self, unsplash_plugin):
-        """Test getting images list."""
-        # Mock scan_images by setting the internal _images list
-        test_images = [{"id": "unsplash-photo1", "url": "https://example.com/image.jpg"}]
-        unsplash_plugin._images = test_images
-        unsplash_plugin._last_scan = datetime.now()  # Set to avoid rescanning
-        
-        images = await unsplash_plugin.get_images()
-        assert len(images) == 1
-        assert images[0]["id"] == "unsplash-photo1"
-
-    @pytest.mark.asyncio
-    async def test_get_image(self, unsplash_plugin):
-        """Test getting a specific image by ID."""
-        # Mock scan_images by setting the internal _images list
-        test_images = [
-            {"id": "unsplash-photo1", "url": "https://example.com/image1.jpg"},
-            {"id": "unsplash-photo2", "url": "https://example.com/image2.jpg"},
-        ]
-        unsplash_plugin._images = test_images
-        unsplash_plugin._last_scan = datetime.now()  # Set to avoid rescanning
-        
-        image = await unsplash_plugin.get_image("unsplash-photo1")
-        assert image is not None
-        assert image["id"] == "unsplash-photo1"
-
-        image = await unsplash_plugin.get_image("unsplash-nonexistent")
-        assert image is None
-
-    @pytest.mark.asyncio
-    async def test_get_image_data(self, unsplash_plugin):
-        """Test getting image file data."""
-        # Mock scan_images by setting the internal _images list
-        unsplash_plugin._images = [
-            {
-                "id": "unsplash-photo1",
-                "url": "https://example.com/image.jpg",
-                "raw_url": "https://example.com/image-raw.jpg",
-            }
-        ]
-        unsplash_plugin._last_scan = datetime.now()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.content = b"fake image data"
-            mock_response.raise_for_status = MagicMock()
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
-            data = await unsplash_plugin.get_image_data("unsplash-photo1")
-            assert data == b"fake image data"
-
-    @pytest.mark.asyncio
-    async def test_get_image_data_not_found(self, unsplash_plugin):
-        """Test getting image data for non-existent image."""
-        unsplash_plugin._images = []
-        unsplash_plugin._last_scan = datetime.now()
-
-        data = await unsplash_plugin.get_image_data("unsplash-nonexistent")
-        assert data is None
-
-    @pytest.mark.asyncio
-    async def test_validate_config_valid(self, unsplash_plugin):
-        """Test config validation with valid config."""
-        assert await unsplash_plugin.validate_config({"api_key": "test-key", "category": "popular", "count": 30}) is True
-        assert await unsplash_plugin.validate_config({"category": "latest", "count": 1}) is True
-        assert await unsplash_plugin.validate_config({"category": "oldest", "count": 100}) is True
-        assert await unsplash_plugin.validate_config({"count": 50}) is True  # API key optional
-
-    @pytest.mark.asyncio
-    async def test_validate_config_invalid_category(self, unsplash_plugin):
-        """Test config validation with invalid category."""
-        assert await unsplash_plugin.validate_config({"category": "invalid"}) is False
-
-    @pytest.mark.asyncio
-    async def test_validate_config_invalid_count(self, unsplash_plugin):
-        """Test config validation with invalid count."""
-        assert await unsplash_plugin.validate_config({"count": 0}) is False
-        assert await unsplash_plugin.validate_config({"count": 101}) is False
-        assert await unsplash_plugin.validate_config({"count": -1}) is False
-        assert await unsplash_plugin.validate_config({"count": "not-a-number"}) is False
-
-    @pytest.mark.asyncio
-    async def test_configure(self, unsplash_plugin):
-        """Test plugin configuration."""
-        assert unsplash_plugin.api_key == "test-api-key"
-        assert unsplash_plugin.category == "popular"
-        assert unsplash_plugin.count == 30
-
-        await unsplash_plugin.configure({"api_key": "new-key", "category": "latest", "count": 50})
-        assert unsplash_plugin.api_key == "new-key"
-        assert unsplash_plugin.category == "latest"
-        assert unsplash_plugin.count == 50
-
-        # Test capping at 100
-        await unsplash_plugin.configure({"count": 200})
-        assert unsplash_plugin.count == 100
-
-        # Verify cache is reset
-        assert unsplash_plugin._last_scan is None
-
-    @pytest.mark.asyncio
-    async def test_configure_empty_api_key(self, unsplash_plugin):
-        """Test that empty API key becomes None."""
-        assert unsplash_plugin.api_key == "test-api-key"
-
-        await unsplash_plugin.configure({"api_key": ""})
-        assert unsplash_plugin.api_key is None
-
-        await unsplash_plugin.configure({"api_key": "   "})  # Whitespace only
-        # configure method should strip whitespace and convert to None
-        assert unsplash_plugin.api_key is None
-
-
-@pytest.mark.asyncio
-class TestUnsplashPluginHooks:
-    """Tests for Unsplash plugin hooks."""
-
-    async def test_create_plugin_instance(self):
-        """Test create_plugin_instance hook."""
-        # This would need to be tested in the actual backend context
-        # with proper plugin loading
-        pass
-
-    async def test_handle_plugin_config_update(self):
-        """Test handle_plugin_config_update hook.
-        
-        Note: This test is skipped when run from the plugin directory because it requires
-        the `test_db` fixture which is only available in the backend test suite.
-        
-        To test handle_plugin_config_update hooks, run the backend test suite from the
-        backend directory:
-            cd backend
-            pytest tests/unit/test_plugin_hooks.py
-        
-        These tests verify that plugin hooks correctly call handle_plugin_config_update_generic.
-        """
-        pytest.skip("Requires backend test fixtures (test_db, allow_module_level=True). "
-                   "Run from backend directory: "
-                   "cd backend && pytest tests/unit/test_plugin_hooks.py")
-
-
-class TestUnsplashPluginIntegration:
-    """Integration tests for Unsplash plugin (require backend context)."""
-
-    @pytest.mark.asyncio
-    async def test_different_categories(self, unsplash_plugin):
-        """Test that different categories work correctly."""
-        mock_photos = [
-            {
-                "id": f"photo{i}",
-                "width": 1920,
-                "height": 1080,
-                "urls": {"regular": f"https://example.com/photo{i}.jpg", "raw": f"https://example.com/photo{i}-raw.jpg"},
-                "user": {"name": f"User {i}", "links": {}},
-                "created_at": "2024-01-01T00:00:00Z",
-            }
-            for i in range(10)
-        ]
-
-        for category in ["popular", "latest", "oldest"]:
-            unsplash_plugin.category = category
-            unsplash_plugin._last_scan = None  # Reset cache
-
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.json.return_value = mock_photos
-                mock_response.raise_for_status = MagicMock()
-                mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
-
-                images = await unsplash_plugin.scan_images()
-
-                # Verify the category parameter was passed correctly
-                call_args = mock_client.return_value.__aenter__.return_value.get.call_args
-                params = call_args.kwargs.get("params", {})
-                assert params.get("order_by") == category
-                assert len(images) > 0
+    async def test_get_image_data_not_found(self, plugin):
+        plugin._images = []
+        plugin._last_scan = datetime.now()
+        assert await plugin.get_image_data("unsplash-nope") is None

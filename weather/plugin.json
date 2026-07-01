@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "weather",
   "name": "Weather",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "service",
   "description": "Display current weather conditions and forecast from OpenWeatherMap",
   "author": "Calvin Team",
@@ -16,15 +15,10 @@
     "openweathermap",
     "service"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
-  },
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json",
-      "frontend/WeatherStatusbar.vue"
+      "plugin.json"
     ],
     "exclude": [
       "*.md",
@@ -33,7 +27,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": true
   }
 }
