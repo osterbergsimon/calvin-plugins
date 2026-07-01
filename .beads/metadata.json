@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "calvin_plugins",
+  "project_id": "ac49885c-de5f-46fa-b5a7-5eb5bc5e5bcf"
+}
