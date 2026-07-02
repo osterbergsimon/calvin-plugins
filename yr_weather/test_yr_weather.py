@@ -213,6 +213,28 @@ class TestConfig:
         assert await YrWeatherServicePlugin.validate_config({"latitude": 59.9139}) is False
         assert await YrWeatherServicePlugin.validate_config({}) is False
 
+    async def test_validate_config_rejects_unconfigured_coords(self):
+        # calvin-8p0: enabling the plugin type runs normalize -> validate on an
+        # empty config. With no lat/lon schema defaults that normalizes to 0/0,
+        # which must NOT validate — otherwise a phantom instance is auto-created.
+        empty_normalized = YrWeatherServicePlugin.normalize_config({})
+        assert empty_normalized["latitude"] == 0.0
+        assert empty_normalized["longitude"] == 0.0
+        assert await YrWeatherServicePlugin.validate_config(empty_normalized) is False
+        assert (
+            await YrWeatherServicePlugin.validate_config({"latitude": 0.0, "longitude": 0.0})
+            is False
+        )
+        # A genuine single-axis-zero location (equator or Greenwich) still validates.
+        assert (
+            await YrWeatherServicePlugin.validate_config({"latitude": 0.0, "longitude": 10.75})
+            is True
+        )
+        assert (
+            await YrWeatherServicePlugin.validate_config({"latitude": 51.5, "longitude": 0.0})
+            is True
+        )
+
     def test_instance_identity_stable_per_coordinates(self):
         config = {"latitude": 59.9139, "longitude": 10.7522}
         other = {"latitude": 51.5074, "longitude": -0.1278}
