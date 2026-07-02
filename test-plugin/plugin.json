@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "test_plugin",
   "name": "Test Plugin",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "service",
   "description": "A basic test plugin for plugin installation testing",
   "author": "Calvin Test Suite",
@@ -15,10 +14,6 @@
     "example",
     "service"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
-  },
   "files": {
     "include": [
       "plugin.py",
@@ -31,7 +26,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }

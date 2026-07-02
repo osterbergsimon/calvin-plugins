@@ -1,248 +1,248 @@
-"""Weather service plugin using OpenWeatherMap API."""
+"""Weather service plugin using the OpenWeatherMap API.
 
-import hashlib
+Calvin plugin contract 1.0: one declarative class, config declared once in
+`metadata.instance_config_schema`, a kind-based `display_schema` /
+`statusbar_schema`, and `fetch()` as the single data verb. There are no
+module-level hooks — the host discovers this class and derives everything
+else from `metadata`.
+"""
+
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
 from loguru import logger
 
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ServicePlugin
-from app.plugins.sdk.service import (
-    ServiceConfigField,
-    build_service_manager_config,
-    build_service_plugin_metadata,
-    create_service_plugin_instance,
-)
-from app.plugins.utils.config import extract_config_value, to_bool, to_str, to_int
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
-# Loguru automatically includes module/function info in logs
+# OpenWeatherMap icon codes -> Calvin weather icon ids. The weather-forecast
+# renderer resolves these via frontend/src/utils/weatherIcons.js — only
+# `mdi:weather-*` identifiers listed there render; anything else falls back
+# to the cloudy glyph.
+OWM_ICON_TO_MDI = {
+    "01d": "mdi:weather-sunny",
+    "01n": "mdi:weather-night",
+    "02d": "mdi:weather-partly-cloudy",
+    "02n": "mdi:weather-partly-cloudy",
+    "03d": "mdi:weather-cloudy",
+    "03n": "mdi:weather-cloudy",
+    "04d": "mdi:weather-cloudy",
+    "04n": "mdi:weather-cloudy",
+    "09d": "mdi:weather-pouring",
+    "09n": "mdi:weather-pouring",
+    "10d": "mdi:weather-rainy",
+    "10n": "mdi:weather-rainy",
+    "11d": "mdi:weather-lightning",
+    "11n": "mdi:weather-lightning",
+    "13d": "mdi:weather-snowy",
+    "13n": "mdi:weather-snowy",
+    "50d": "mdi:weather-fog",
+    "50n": "mdi:weather-fog",
+}
+
+# Compact text glyphs for the statusbar `status` renderer, which displays the
+# icon string literally (it is not an mdi lookup).
+MDI_TO_GLYPH = {
+    "mdi:weather-sunny": "☀️",
+    "mdi:weather-night": "🌙",
+    "mdi:weather-partly-cloudy": "⛅",
+    "mdi:weather-cloudy": "☁️",
+    "mdi:weather-rainy": "🌧️",
+    "mdi:weather-pouring": "🌧️",
+    "mdi:weather-snowy": "❄️",
+    "mdi:weather-lightning": "⛈️",
+    "mdi:weather-fog": "🌫️",
+    "mdi:weather-windy": "💨",
+}
+
+# OWM wind speed is m/s for metric/standard and mph for imperial; the payload
+# always carries m/s so the display schema can declare one wind unit.
+_MPH_TO_MS = 0.44704
 
 
-CREATE_FIELDS = (
-    ServiceConfigField(
-        "api_key",
-        default="",
-        converter=to_str,
-        transform=lambda value: str(value).strip() if value else "",
-    ),
-    ServiceConfigField(
-        "location",
-        default="",
-        converter=to_str,
-        transform=lambda value: str(value).strip() if value else "",
-    ),
-    ServiceConfigField(
-        "units",
-        default="metric",
-        converter=to_str,
-        transform=lambda value: str(value).strip() if value else "metric",
-    ),
-    ServiceConfigField(
-        "forecast_days",
-        default=3,
-        converter=to_int,
-        transform=lambda value: min(max(int(value), 1), 5) if value else 3,
-    ),
-    ServiceConfigField("display_order", default=0, converter=to_int),
-    ServiceConfigField("fullscreen", default=False, converter=to_bool),
-)
+def _owm_icon(code: str | None) -> str:
+    return OWM_ICON_TO_MDI.get(str(code or ""), "mdi:weather-cloudy")
+
+
+def _glyph(mdi_icon: str) -> str:
+    return MDI_TO_GLYPH.get(mdi_icon, "☁️")
 
 
 class WeatherServicePlugin(ServicePlugin):
     """Weather service plugin for displaying current conditions and forecast."""
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return build_service_plugin_metadata(
-            type_id="weather",
-            name="Weather",
-            description="Display current weather conditions and forecast from OpenWeatherMap",
-            plugin_class=cls,
-            supports_multiple_instances=True,
-            instance_label="Location",
-            common_config_schema={
-                "api_key": {
-                    "type": "password",
-                    "description": "OpenWeatherMap API key",
-                    "default": "",
-                    "global_only": True,  # This field is global, not instance-specific
-                    "ui": {
-                        "component": "password",
-                        "placeholder": "Enter your OpenWeatherMap API key",
-                        "help_text": "Get a free API key at https://openweathermap.org/api",
-                        "validation": {
-                            "required": True,
-                        },
+    metadata = PluginMetadata(
+        type_id="weather",
+        name="Weather",
+        description="Display current weather conditions and forecast from OpenWeatherMap",
+        default_instance_name="Weather",
+        instance_label="Location",
+        # Same location -> same instance
+        instance_identity=["location"],
+        common_config_schema={
+            "api_key": {
+                "type": "password",
+                "description": "OpenWeatherMap API key",
+                "default": "",
+                "global_only": True,  # This field is global, not instance-specific
+                "ui": {
+                    "component": "password",
+                    "placeholder": "Enter your OpenWeatherMap API key",
+                    "help_text": "Get a free API key at https://openweathermap.org/api",
+                    "validation": {
+                        "required": True,
                     },
                 },
             },
-            instance_config_schema={
-                "location": {
-                    "type": "string",
-                    "description": "Location (city name, state code, country code)",
-                    "default": "",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "London, UK or New York, US",
-                        "help_text": "City name with optional state/country code (e.g., 'London, UK' or 'New York, US')",  # noqa: E501
-                        "validation": {
-                            "required": True,
-                        },
-                    },
-                },
-                "units": {
-                    "type": "string",
-                    "description": "Temperature units",
-                    "default": "metric",
-                    "ui": {
-                        "component": "select",
-                        "options": [
-                            {"value": "metric", "label": "Metric (°C)"},
-                            {"value": "imperial", "label": "Imperial (°F)"},
-                            {"value": "kelvin", "label": "Kelvin (K)"},
-                        ],
-                        "help_text": "Temperature unit system",
-                    },
-                },
-                "forecast_days": {
-                    "type": "integer",
-                    "description": "Number of forecast days to show (1-5)",
-                    "default": 3,
-                    "ui": {
-                        "component": "number",
-                        "placeholder": "3",
-                        "help_text": "Number of days to show in forecast (1-5 days)",
-                        "validation": {
-                            "min": 1,
-                            "max": 5,
-                        },
-                    },
-                },
-                "fullscreen": {
-                    "type": "boolean",
-                    "description": "Prefer fullscreen mode",
-                    "default": False,
-                    "ui": {
-                        "component": "checkbox",
-                        "help_text": "Open this service in fullscreen by default",
-                    },
-                },
-                "show_in_statusbar": {
-                    "type": "boolean",
-                    "description": "Show temperature in the clock bar",
-                    "default": False,
-                    "ui": {
-                        "component": "checkbox",
-                        "help_text": "Display current temperature next to the clock",
+        },
+        instance_config_schema={
+            "location": {
+                "type": "string",
+                "description": "Location (city name, state code, country code)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "London, UK or New York, US",
+                    "help_text": "City name with optional state/country code (e.g., 'London, UK' or 'New York, US')",  # noqa: E501
+                    "validation": {
+                        "required": True,
                     },
                 },
             },
-            ui_actions=[
-                {
-                    "id": "save",
-                    "type": "save",
-                    "label": "Save Settings",
-                    "style": "primary",
-                    "scope": "global",
+            "units": {
+                "type": "string",
+                "description": "Temperature units",
+                "default": "metric",
+                "ui": {
+                    "component": "select",
+                    "options": [
+                        {"value": "metric", "label": "Metric (°C)"},
+                        {"value": "imperial", "label": "Imperial (°F)"},
+                        {"value": "kelvin", "label": "Kelvin (K)"},
+                    ],
+                    "help_text": "Temperature unit system",
                 },
-                {
-                    "id": "test",
-                    "type": "test",
-                    "label": "Test Connection",
-                    "style": "secondary",
-                    "scope": "instance",
-                },
-            ],
-            display_schema={
-                "type": "api",
-                "api_endpoint": "/api/plugins/{service_id}/data",
-                "method": "GET",
-                "data_schema": {
-                    "current": {
-                        "type": "object",
-                        "description": "Current weather conditions",
-                        "properties": {
-                            "temperature": {"type": "number"},
-                            "feels_like": {"type": "number"},
-                            "humidity": {"type": "number"},
-                            "pressure": {"type": "number"},
-                            "description": {"type": "string"},
-                            "icon": {"type": "string"},
-                            "wind_speed": {"type": "number"},
-                            "wind_direction": {"type": "number"},
-                        },
-                    },
-                    "forecast": {
-                        "type": "array",
-                        "description": "Weather forecast",
-                        "item_schema": {
-                            "date": {"type": "string", "format": "date"},
-                            "temperature": {"type": "number"},
-                            "temp_min": {"type": "number"},
-                            "temp_max": {"type": "number"},
-                            "description": {"type": "string"},
-                            "icon": {"type": "string"},
-                        },
-                    },
-                    "location": {"type": "string"},
-                    "units": {"type": "string"},
-                },
-                "render_template": "weather",
             },
-            statusbar_schema={
-                "component": "weather/WeatherStatusbar.vue",
+            "forecast_days": {
+                "type": "integer",
+                "description": "Number of forecast days to show (1-5)",
+                "default": 3,
+                "ui": {
+                    "component": "number",
+                    "placeholder": "3",
+                    "help_text": "Number of days to show in forecast (1-5 days)",
+                    "validation": {
+                        "min": 1,
+                        "max": 5,
+                    },
+                },
             },
-        )
+            "fullscreen": {
+                "type": "boolean",
+                "description": "Prefer fullscreen mode",
+                "default": False,
+                "ui": {
+                    "component": "checkbox",
+                    "help_text": "Open this service in fullscreen by default",
+                },
+            },
+            "show_in_statusbar": {
+                "type": "boolean",
+                "description": "Show temperature in the clock bar",
+                "default": False,
+                "ui": {
+                    "component": "checkbox",
+                    "help_text": "Display current temperature next to the clock",
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "global",
+            },
+            {
+                "id": "test",
+                "type": "test",
+                "label": "Test Connection",
+                "style": "secondary",
+                "scope": "instance",
+            },
+        ],
+        # The payload from fetch() feeds the built-in weather-forecast renderer.
+        display_schema={
+            "kind": "weather-forecast",
+            "current_path": "$.current",
+            "forecast_path": "$.forecast",
+            "current": {
+                "temperature_path": "$.temperature",
+                "description_path": "$.description",
+                "icon_path": "$.icon",
+                "feels_like_path": "$.feels_like",
+                "humidity_path": "$.humidity",
+                "pressure_path": "$.pressure",
+                "wind_speed_path": "$.wind_speed",
+            },
+            "forecast": {
+                "date_path": "$.date",
+                "icon_path": "$.icon",
+                "temp_min_path": "$.temp_min",
+                "temp_max_path": "$.temp_max",
+                "description_path": "$.description",
+            },
+            # The unit system is per-instance config, but the schema is
+            # class-level — "°" is unit-agnostic; wind is normalized to m/s
+            # in fetch().
+            "units": {"temperature": "°", "wind": "m/s"},
+            "poll_interval_ms": 1800000,
+        },
+        # Statusbar item: condition glyph + current temperature, bound to the
+        # same fetch() payload.
+        statusbar_schema={
+            "kind": "status",
+            "item": {
+                "icon_path": "$.current.glyph",
+                "value_path": "$.current.temperature",
+                "unit": "°",
+            },
+        },
+    )
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        api_key: str,
-        location: str,
-        units: str = "metric",
-        forecast_days: int = 3,
-        enabled: bool = True,
-        display_order: int = 0,
-        fullscreen: bool = False,
-    ):
-        """
-        Initialize Weather service plugin.
-
-        Args:
-            plugin_id: Unique identifier for the plugin
-            name: Human-readable name
-            api_key: OpenWeatherMap API key
-            location: Location (city name, state code, country code)
-            units: Temperature units (metric, imperial, kelvin)
-            forecast_days: Number of forecast days to show (1-5)
-            enabled: Whether the plugin is enabled
-            display_order: Display order for service rotation
-            fullscreen: Whether to display in fullscreen mode
-        """
+    def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         super().__init__(plugin_id, name, enabled)
-        self.api_key = api_key
-        self.location = location
-        self.units = units
-        self.forecast_days = min(max(forecast_days, 1), 5)  # Clamp between 1 and 5
-        self.display_order = display_order
-        self.fullscreen = fullscreen
         self._client: httpx.AsyncClient | None = None
 
-    async def initialize(self) -> None:
-        """Initialize the plugin."""
-        # Validate API key
-        if not self.api_key or not self.api_key.strip():
-            raise ValueError("OpenWeatherMap API key is required")
+    # Config accessors — values live in self.config (schema-normalized);
+    # these apply the trims/clamps the wire format doesn't guarantee.
 
-        # Validate location
-        if not self.location or not self.location.strip():
+    @property
+    def api_key(self) -> str:
+        return str(self.config.get("api_key") or "").strip()
+
+    @property
+    def location(self) -> str:
+        return str(self.config.get("location") or "").strip()
+
+    @property
+    def units(self) -> str:
+        return str(self.config.get("units") or "").strip() or "metric"
+
+    @property
+    def forecast_days(self) -> int:
+        return min(max(int(self.config.get("forecast_days") or 3), 1), 5)
+
+    async def initialize(self) -> None:
+        """Validate config and create the HTTP client."""
+        if not self.api_key:
+            raise ValueError("OpenWeatherMap API key is required")
+        if not self.location:
             raise ValueError("Location is required")
 
-        # Create HTTP client
         self._client = httpx.AsyncClient(
             base_url="https://api.openweathermap.org/data/2.5",
             timeout=30.0,
@@ -254,154 +254,61 @@ class WeatherServicePlugin(ServicePlugin):
             await self._client.aclose()
             self._client = None
 
-    async def get_content(self) -> dict[str, Any]:
-        """
-        Get service content for display.
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration; drop the client so it's rebuilt with new settings."""
+        await super().configure(config)
+        if self._client:
+            await self._client.aclose()
+            self._client = None
 
-        Returns:
-            Dictionary with content information
-        """
-        # Return a special URL that points to our backend endpoint
-        weather_api_url = f"/api/plugins/{self.plugin_id}/data"
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require an API key and a location."""
+        normalized = cls.normalize_config(config)
+        api_key = str(normalized.get("api_key") or "").strip()
+        location = str(normalized.get("location") or "").strip()
+        return bool(api_key and location)
 
-        return {
-            "type": "weather",
-            "url": weather_api_url,
-            "data": {
-                "api_key": self.api_key,  # Not sent to frontend, used by backend
-                "location": self.location,
-                "units": self.units,
-            },
-            "config": {
-                "allowFullscreen": True,
-            },
-        }
-
-    def get_config(self) -> dict[str, Any]:
-        """
-        Get plugin configuration.
-
-        Returns:
-            Configuration dictionary
-        """
-        weather_api_url = f"/api/plugins/{self.plugin_id}/data"
-        return {
-            "url": weather_api_url,
-            "api_key": self.api_key,
-            "location": self.location,
-            "units": self.units,
-            "forecast_days": self.forecast_days,
-            "display_order": self.display_order,
-            "fullscreen": self.fullscreen,
-        }
-
-    async def fetch_service_data(
+    async def fetch(
         self,
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
         """
-        Fetch weather data from OpenWeatherMap API (protocol-defined method).
+        Fetch weather data and shape it for the weather-forecast display schema.
 
         Args:
             start_date: Not used for weather (kept for protocol compatibility)
             end_date: Not used for weather (kept for protocol compatibility)
 
         Returns:
-            Dictionary with weather data in format compatible with WeatherWidget
-        """
-        return await self._fetch_weather()
-
-    async def _fetch_weather(self) -> dict[str, Any]:
-        """
-        Fetch weather data from OpenWeatherMap API.
-
-        Returns:
-            Dictionary with weather data
+            {"current": {...}, "forecast": [...], "location", "units"} on
+            success; {"error", "message"?} on failure.
         """
         if not self._client:
             await self.initialize()
 
         try:
-            # Fetch current weather
-            current_params = {
+            common_params = {
                 "q": self.location,
                 "appid": self.api_key,
                 "units": self.units,
             }
 
-            current_response = await self._client.get("/weather", params=current_params)
+            current_response = await self._client.get("/weather", params=common_params)
             current_response.raise_for_status()
-            current_data = current_response.json()
 
-            # Fetch forecast
-            forecast_params = {
-                "q": self.location,
-                "appid": self.api_key,
-                "units": self.units,
-                "cnt": self.forecast_days * 8,  # 8 forecasts per day (3-hour intervals)
-            }
-
-            forecast_response = await self._client.get("/forecast", params=forecast_params)
-            forecast_response.raise_for_status()
-            forecast_data = forecast_response.json()
-
-            # Process current weather
-            current = {
-                "temperature": current_data["main"]["temp"],
-                "feels_like": current_data["main"]["feels_like"],
-                "humidity": current_data["main"]["humidity"],
-                "pressure": current_data["main"]["pressure"],
-                "description": current_data["weather"][0]["description"],
-                "icon": current_data["weather"][0]["icon"],
-                "wind_speed": current_data.get("wind", {}).get("speed", 0),
-                "wind_direction": current_data.get("wind", {}).get("deg", 0),
-            }
-
-            # Process forecast - group by day and get daily min/max
-            from collections import defaultdict
-            from datetime import datetime, timedelta
-
-            forecast_by_date = defaultdict(lambda: {"temps": [], "descriptions": [], "icons": []})
-
-            for item in forecast_data.get("list", []):
-                dt = datetime.fromtimestamp(item["dt"])
-                date_str = dt.date().isoformat()
-
-                forecast_by_date[date_str]["temps"].append(item["main"]["temp"])
-                forecast_by_date[date_str]["descriptions"].append(item["weather"][0]["description"])
-                forecast_by_date[date_str]["icons"].append(item["weather"][0]["icon"])
-
-            # Build forecast list (limit to forecast_days)
-            forecast = []
-            today = datetime.now().date()
-            for i in range(1, self.forecast_days + 1):
-                forecast_date = today + timedelta(days=i)
-                date_str = forecast_date.isoformat()
-
-                if date_str in forecast_by_date:
-                    day_data = forecast_by_date[date_str]
-                    forecast.append(
-                        {
-                            "date": date_str,
-                            "temperature": sum(day_data["temps"]) / len(day_data["temps"]),
-                            "temp_min": min(day_data["temps"]),
-                            "temp_max": max(day_data["temps"]),
-                            "description": day_data["descriptions"][0],  # Use first description
-                            "icon": day_data["icons"][0],  # Use first icon
-                        }
-                    )
-
-            location_name = (
-                f"{current_data['name']}, {current_data.get('sys', {}).get('country', '')}"
+            forecast_response = await self._client.get(
+                "/forecast",
+                params={
+                    **common_params,
+                    # 8 forecasts per day (3-hour intervals)
+                    "cnt": self.forecast_days * 8,
+                },
             )
+            forecast_response.raise_for_status()
 
-            return {
-                "current": current,
-                "forecast": forecast,
-                "location": location_name,
-                "units": self.units,
-            }
+            return self._shape_for_display(current_response.json(), forecast_response.json())
 
         except httpx.HTTPStatusError as e:
             logger.error("HTTP error fetching weather: {} - {}", e.response.status_code, e)
@@ -411,50 +318,84 @@ class WeatherServicePlugin(ServicePlugin):
             }
         except httpx.HTTPError as e:
             logger.exception("Error fetching weather")
-            return {
-                "error": str(e),
-            }
+            return {"error": str(e)}
         except Exception as e:
             logger.exception("Unexpected error fetching weather")
-            return {
-                "error": str(e),
-            }
+            return {"error": str(e)}
 
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        """
-        Validate plugin configuration.
+    def _shape_for_display(
+        self,
+        current_data: dict[str, Any],
+        forecast_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Shape raw OpenWeatherMap responses into the display-schema payload."""
+        icon = _owm_icon(current_data["weather"][0].get("icon"))
+        wind_speed = current_data.get("wind", {}).get("speed", 0)
+        current = {
+            "temperature": round(current_data["main"]["temp"]),
+            "feels_like": round(current_data["main"]["feels_like"]),
+            "humidity": current_data["main"]["humidity"],
+            "pressure": current_data["main"]["pressure"],
+            "description": current_data["weather"][0]["description"],
+            "icon": icon,
+            "glyph": _glyph(icon),
+            "wind_speed": self._wind_to_ms(wind_speed),
+            "wind_direction": current_data.get("wind", {}).get("deg", 0),
+        }
 
-        Args:
-            config: Configuration dictionary
+        # Group 3-hourly forecast entries by day for daily min/max.
+        forecast_by_date: dict[str, dict[str, list]] = defaultdict(
+            lambda: {"temps": [], "descriptions": [], "icons": []}
+        )
+        for item in forecast_data.get("list", []):
+            date_str = datetime.fromtimestamp(item["dt"]).date().isoformat()
+            forecast_by_date[date_str]["temps"].append(item["main"]["temp"])
+            forecast_by_date[date_str]["descriptions"].append(item["weather"][0]["description"])
+            forecast_by_date[date_str]["icons"].append(item["weather"][0]["icon"])
 
-        Returns:
-            True if configuration is valid
-        """
-        # Check if required keys exist
-        if "api_key" not in config or "location" not in config:
-            return False
+        forecast = []
+        today = datetime.now().date()
+        for i in range(1, self.forecast_days + 1):
+            date_str = (today + timedelta(days=i)).isoformat()
+            if date_str not in forecast_by_date:
+                continue
+            day_data = forecast_by_date[date_str]
+            forecast.append(
+                {
+                    "date": date_str,
+                    "temperature": sum(day_data["temps"]) / len(day_data["temps"]),
+                    "temp_min": min(day_data["temps"]),
+                    "temp_max": max(day_data["temps"]),
+                    "description": day_data["descriptions"][0],
+                    "icon": _owm_icon(day_data["icons"][0]),
+                }
+            )
 
-        api_key = extract_config_value(config, "api_key", converter=to_str)
-        location = extract_config_value(config, "location", converter=to_str)
+        location_name = (
+            f"{current_data.get('name', self.location)}, "
+            f"{current_data.get('sys', {}).get('country', '')}"
+        ).rstrip(", ")
 
-        if not api_key or not api_key.strip():
-            return False
+        return {
+            "current": current,
+            "forecast": forecast,
+            "location": location_name,
+            "units": self.units,
+        }
 
-        if not location or not location.strip():
-            return False
-
-        return True
+    def _wind_to_ms(self, wind_speed: float) -> float:
+        """Normalize OWM wind speed to m/s (imperial responses are mph)."""
+        if self.units == "imperial":
+            return wind_speed * _MPH_TO_MS
+        return wind_speed
 
     @classmethod
-    async def test_type_config(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
         """Test OpenWeatherMap connectivity for the configured location."""
-        api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-        location = extract_config_value(config, "location", default="", converter=to_str)
-        units = extract_config_value(config, "units", default="metric", converter=to_str)
-
-        api_key = api_key.strip() if api_key else ""
-        location = location.strip() if location else ""
-        units = units.strip() if units else "metric"
+        normalized = cls.normalize_config(config)
+        api_key = str(normalized.get("api_key") or "").strip()
+        location = str(normalized.get("location") or "").strip()
+        units = str(normalized.get("units") or "").strip() or "metric"
 
         if not api_key or not location:
             return {
@@ -533,123 +474,3 @@ class WeatherServicePlugin(ServicePlugin):
                 "success": False,
                 "message": f"Error: {str(e)}",
             }
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        """
-        Configure the plugin with new settings.
-
-        Args:
-            config: Configuration dictionary
-        """
-        await super().configure(config)
-
-        # Close existing client if any
-        if self._client:
-            await self._client.aclose()
-
-        api_key = extract_config_value(config, "api_key", converter=to_str)
-        location = extract_config_value(config, "location", converter=to_str)
-        units = extract_config_value(config, "units", default="metric", converter=to_str)
-        forecast_days = extract_config_value(config, "forecast_days", default=3, converter=to_int)
-        display_order = extract_config_value(config, "display_order", default=0, converter=to_int)
-        fullscreen = extract_config_value(config, "fullscreen", default=False, converter=to_bool)
-
-        if api_key is not None:
-            self.api_key = str(api_key).strip()
-        if location is not None:
-            self.location = str(location).strip()
-        if units is not None:
-            self.units = str(units).strip() or "metric"
-        if forecast_days is not None:
-            self.forecast_days = min(max(int(forecast_days), 1), 5)
-        if display_order is not None:
-            self.display_order = int(display_order)
-        if fullscreen is not None:
-            self.fullscreen = bool(fullscreen)
-
-        # Reinitialize with new config
-        await self.initialize()
-
-
-# Register this plugin with pluggy
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    """Register WeatherServicePlugin type."""
-    return [WeatherServicePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> WeatherServicePlugin | None:
-    """Create a WeatherServicePlugin instance."""
-    return create_service_plugin_instance(
-        WeatherServicePlugin,
-        expected_type_id="weather",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=CREATE_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    """Handle Weather plugin configuration update and instance management."""
-    if type_id != "weather":
-        return None
-
-    def validate_config(c: dict[str, Any]) -> bool:
-        """Validate config has required api_key and location."""
-        # Check if required keys exist
-        if "api_key" not in c or "location" not in c:
-            return False
-
-        api_key = extract_config_value(c, "api_key", converter=to_str)
-        location = extract_config_value(c, "location", converter=to_str)
-
-        if not api_key or not api_key.strip():
-            return False
-
-        if not location or not location.strip():
-            return False
-
-        return True
-
-    def generate_instance_id(c: dict[str, Any], t: str) -> str:
-        """Generate instance ID from location."""
-        location = extract_config_value(c, "location", converter=to_str)
-        if location:
-            # Generate hash from location (same instance for same location)
-            loc_hash = hashlib.md5(location.encode()).hexdigest()[:8]
-            return f"{t}-{loc_hash}"
-        # Fallback ID if location not available
-        return f"{t}-instance"
-
-    manager_config = build_service_manager_config(
-        type_id="weather",
-        fields=CREATE_FIELDS,
-        single_instance=False,
-        validate_config=validate_config,
-        generate_instance_id=generate_instance_id,
-        extra_normalize=lambda config: {
-            "show_in_statusbar": bool(
-                extract_config_value(config, "show_in_statusbar", default=False, converter=to_bool)
-            )
-        },
-        default_instance_name="Weather",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

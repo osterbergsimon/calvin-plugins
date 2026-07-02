@@ -1,4 +1,10 @@
-"""Lychee self-hosted photo gallery image plugin."""
+"""Lychee self-hosted photo gallery image plugin (plugin contract 1.0).
+
+One declarative class: config is declared once in
+`metadata.instance_config_schema`, the loader discovers the class, and the
+gallery plumbing (auth headers, URL building, protected fetches) comes from
+`SelfHostedGalleryImagePlugin`.
+"""
 
 from datetime import datetime
 from typing import Any
@@ -7,14 +13,8 @@ from urllib.parse import urljoin
 import httpx
 from loguru import logger
 
-from app.plugins.base import PluginType
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.sdk.image import SelfHostedGalleryImagePlugin
-from app.plugins.utils.config import extract_config_value, to_str, to_int
-from app.plugins.utils.instance_manager import (
-    InstanceManagerConfig,
-    handle_plugin_config_update_generic,
-)
 from app.plugins.utils.scan_cache import load_scan_cache, save_scan_cache
 
 _SCAN_INTERVAL = 3600  # Re-fetch album listing every hour
@@ -28,62 +28,69 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
     auth_header_name = "Authorization"
     auth_header_prefix = "Bearer "
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        return {
-            "type_id": "lychee",
-            "plugin_type": PluginType.IMAGE,
-            "name": "Lychee",
-            "description": "Photos from your self-hosted Lychee photo gallery",
-            "version": "1.0.0",
-            "supports_multiple_instances": True,
-            "instance_label": "Gallery",
-            "common_config_schema": {},
-            "instance_config_schema": {
-                "url": {
-                    "type": "string",
-                    "description": "Base URL of your Lychee instance (e.g. https://photos.example.com)",
-                    "default": "",
-                    "ui": {
-                        "component": "text",
-                        "placeholder": "https://photos.example.com",
-                        "validation": {"required": True},
-                    },
-                },
-                "api_key": {
-                    "type": "password",
-                    "description": "Lychee API token (Settings → Security → API keys)",
-                    "default": "",
-                    "ui": {
-                        "component": "password",
-                        "placeholder": "Enter your Lychee API token",
-                        "validation": {"required": True},
-                    },
-                },
-                "album_id": {
-                    "type": "string",
-                    "description": "Album ID to show (leave blank for all accessible photos)",
-                    "default": "",
-                    "ui": {
-                        "component": "text",
-                        "placeholder": "Leave blank for all albums",
-                    },
+    metadata = PluginMetadata(
+        type_id="lychee",
+        name="Lychee",
+        description="Photos from your self-hosted Lychee photo gallery",
+        default_instance_name="Lychee",
+        instance_label="Gallery",
+        # Same Lychee server -> same instance
+        instance_identity=["url"],
+        instance_config_schema={
+            "url": {
+                "type": "string",
+                "description": "Base URL of your Lychee instance (e.g. https://photos.example.com)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "https://photos.example.com",
+                    "validation": {"required": True, "type": "url"},
                 },
             },
-            "plugin_class": cls,
-        }
+            "api_key": {
+                "type": "password",
+                "description": "Lychee API token (Settings → Security → API keys)",
+                "default": "",
+                "ui": {
+                    "component": "password",
+                    "placeholder": "Enter your Lychee API token",
+                    "validation": {"required": True},
+                },
+            },
+            "album_id": {
+                "type": "string",
+                "description": "Album ID to show (leave blank for all accessible photos)",
+                "default": "",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "Leave blank for all albums",
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "instance",
+            },
+            {
+                "id": "test",
+                "type": "test",
+                "label": "Test Connection",
+                "style": "secondary",
+                "scope": "instance",
+            },
+        ],
+    )
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        url: str = "",
-        api_key: str = "",
-        album_id: str = "",
-        enabled: bool = True,
-    ):
-        super().__init__(plugin_id, name, url=url, api_key=api_key, enabled=enabled)
-        self.album_id = album_id
+    # Config accessors — base_url and api_key come from the gallery SDK base;
+    # this covers the Lychee-specific field.
+
+    @property
+    def album_id(self) -> str:
+        return str(self.config.get("album_id") or "").strip()
 
     async def initialize(self) -> None:
         cached_images, cached_time = load_scan_cache(self.plugin_id)
@@ -92,8 +99,42 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
             self._last_scan = cached_time
         await self.scan_images()
 
-    async def cleanup(self) -> None:
-        pass
+    async def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration and force a rescan on next access."""
+        await super().configure(config)
+        self._last_scan = None
+
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require url + api_key (schema) and an http(s) URL scheme."""
+        if not await super().validate_config(config):
+            return False
+        normalized = cls.normalize_config(config)
+        url = str(normalized.get("url") or "").strip()
+        return url.startswith(("http://", "https://"))
+
+    @classmethod
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
+        """List Lychee albums with the configured API token."""
+        normalized = cls.normalize_config(config)
+        url = str(normalized.get("url") or "").rstrip("/")
+        api_key = str(normalized.get("api_key") or "").strip()
+        if not url or not api_key:
+            return {"success": False, "message": "Lychee URL and API token are required"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{url}/api/v2/Albums",
+                    headers=cls.build_auth_headers(api_key),
+                )
+            if response.status_code == 200:
+                return {"success": True, "message": "Connected to Lychee successfully."}
+            return {
+                "success": False,
+                "message": f"Lychee returned HTTP {response.status_code}. Check the URL and API token.",
+            }
+        except httpx.HTTPError as e:
+            return {"success": False, "message": f"Could not connect to {url}: {e}"}
 
     async def get_images(self) -> list[dict[str, Any]]:
         await self.scan_images()
@@ -202,79 +243,3 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
             "photographer": photo.get("taken_at", ""),
             "date": photo.get("created_at", ""),
         }
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        url = extract_config_value(config, "url", default="", converter=to_str).rstrip("/")
-        api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-        if not url or not api_key:
-            return False
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{url}/api/v2/Albums",
-                    headers=self.build_auth_headers(api_key),
-                )
-                return response.status_code == 200
-        except httpx.HTTPError:
-            return False
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        await super().configure(config)
-        self.base_url = extract_config_value(config, "url", default="", converter=to_str).rstrip("/")
-        self.api_key = extract_config_value(config, "api_key", default="", converter=to_str)
-        self.album_id = extract_config_value(config, "album_id", default="", converter=to_str)
-        self._last_scan = None
-
-
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    return [LycheeImagePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> LycheeImagePlugin | None:
-    if type_id != "lychee":
-        return None
-    return LycheeImagePlugin(
-        plugin_id=plugin_id,
-        name=name,
-        url=extract_config_value(config, "url", default="", converter=to_str),
-        api_key=extract_config_value(config, "api_key", default="", converter=to_str),
-        album_id=extract_config_value(config, "album_id", default="", converter=to_str),
-        enabled=config.get("enabled", False),
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    if type_id != "lychee":
-        return None
-
-    def normalize_config(c: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "url": extract_config_value(c, "url", default="", converter=to_str),
-            "api_key": extract_config_value(c, "api_key", default="", converter=to_str),
-            "album_id": extract_config_value(c, "album_id", default="", converter=to_str),
-        }
-
-    manager_config = InstanceManagerConfig(
-        type_id="lychee",
-        single_instance=False,
-        normalize_config=normalize_config,
-        default_instance_name="Lychee",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

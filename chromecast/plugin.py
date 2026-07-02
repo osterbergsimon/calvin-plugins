@@ -3,22 +3,21 @@
 Discovers Chromecasts on the local network via mDNS and exposes the active
 media status (title, artist, album art, app name) as a dashboard widget.
 Works with YouTube Music, Spotify, Netflix, Plex, and any Cast-enabled app.
+
+Plugin contract 1.0: one declarative class, config declared once in
+`metadata.instance_config_schema`, and `fetch()` as the single data verb.
+The display is a `web-component` — the host loads `frontend/dist.js`
+(served at /api/plugins/{id}/static/dist.js), mounts the
+`calvin-chromecast-now-playing` custom element, and pushes each fetch()
+payload onto its `data` property.
 """
 
 import asyncio
 import time
 from typing import Any
 
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ServicePlugin
-from app.plugins.sdk.service import (
-    ServiceConfigField,
-    build_service_manager_config,
-    build_service_plugin_metadata,
-    create_service_plugin_instance,
-)
-from app.plugins.utils.config import extract_config_value, to_int, to_str
-from app.plugins.utils.instance_manager import handle_plugin_config_update_generic
 
 try:
     import pychromecast
@@ -28,97 +27,120 @@ except ImportError:
     _PYCHROMECAST_AVAILABLE = False
 
 
-SERVICE_FIELDS = (
-    ServiceConfigField("device_name", default="", converter=to_str),
-    ServiceConfigField("discovery_timeout", default=5, converter=to_int),
-)
-
-
 class ChromecastServicePlugin(ServicePlugin):
     """Displays what is currently casting on a Chromecast device."""
 
+    metadata = PluginMetadata(
+        type_id="chromecast",
+        name="Chromecast Now Playing",
+        description=(
+            "Show what's casting on any Chromecast — YouTube Music, Spotify, Netflix and more"
+        ),
+        supports_multiple_instances=True,
+        instance_label="Device",
+        default_instance_name="Chromecast",
+        # Same device -> same instance (empty device_name falls back to the
+        # generic config-hash id).
+        instance_identity=["device_name"],
+        instance_config_schema={
+            "device_name": {
+                "type": "string",
+                "description": "Chromecast device",
+                "default": "",
+                "ui": {
+                    "component": "select-scan",
+                    "placeholder": "Click Scan to discover devices on your network",
+                },
+            },
+            "discovery_timeout": {
+                "type": "integer",
+                "description": "mDNS discovery timeout in seconds",
+                "default": 5,
+                "ui": {
+                    "component": "number",
+                    "min": 2,
+                    "max": 30,
+                    "placeholder": "5",
+                },
+            },
+        },
+        ui_actions=[
+            {
+                "id": "save",
+                "type": "save",
+                "label": "Save Settings",
+                "style": "primary",
+                "scope": "instance",
+            },
+        ],
+        display_schema={
+            "kind": "web-component",
+            "title": "Chromecast",
+            "title_path": "$.device_name",
+            "panel_variant": "media",
+            "element": "calvin-chromecast-now-playing",
+            "module": "dist.js",
+            "poll_interval_ms": 10 * 1000,
+        },
+    )
+
+    # Config accessors — values live in self.config (schema-normalized).
+
+    @property
+    def device_name(self) -> str:
+        return str(self.config.get("device_name") or "").strip()
+
+    @property
+    def discovery_timeout(self) -> int:
+        return int(self.config.get("discovery_timeout") or 5)
+
     @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        return build_service_plugin_metadata(
-            type_id="chromecast",
-            name="Chromecast Now Playing",
-            description="Show what's casting on any Chromecast — YouTube Music, Spotify, Netflix and more",
-            plugin_class=cls,
-            supports_multiple_instances=True,
-            instance_label="Device",
-            instance_config_schema={
-                "device_name": {
-                    "type": "string",
-                    "description": "Chromecast device",
-                    "default": "",
-                    "ui": {
-                        "component": "select-scan",
-                        "placeholder": "Click Scan to discover devices on your network",
-                    },
-                },
-                "discovery_timeout": {
-                    "type": "string",
-                    "description": "mDNS discovery timeout in seconds",
-                    "default": "5",
-                    "ui": {
-                        "component": "number",
-                        "min": 2,
-                        "max": 30,
-                        "placeholder": "5",
-                    },
-                },
-            },
-            display_schema={
-                "kind": "web-component",
-                "title": "Chromecast",
-                "title_path": "$.device_name",
-                "panel_variant": "media",
-                "element": "calvin-chromecast-now-playing",
-                "module": "dist.js",
-                "poll_interval_ms": 10 * 1000,
-            },
-        )
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require pychromecast and a sane discovery timeout."""
+        if not _PYCHROMECAST_AVAILABLE:
+            return False
+        normalized = cls.normalize_config(config)
+        timeout = normalized.get("discovery_timeout")
+        if timeout is not None and not (2 <= int(timeout) <= 30):
+            return False
+        return True
 
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        device_name: str = "",
-        discovery_timeout: int = 5,
-        enabled: bool = True,
-    ):
-        super().__init__(plugin_id, name, enabled)
-        self.device_name = device_name
-        self.discovery_timeout = discovery_timeout
+    @classmethod
+    async def scan_options(cls, field_key: str) -> dict[str, Any] | None:
+        """Discover Chromecast devices for the device_name field."""
+        if field_key != "device_name":
+            return None
+        if not _PYCHROMECAST_AVAILABLE:
+            return {"options": [], "error": "pychromecast is not installed"}
 
-    async def initialize(self) -> None:
-        pass
+        def _discover():
+            chromecasts, browser = pychromecast.get_chromecasts(timeout=5)
+            pychromecast.discovery.stop_discovery(browser)
+            return [
+                {"value": c.cast_info.friendly_name, "label": c.cast_info.friendly_name}
+                for c in chromecasts
+            ]
 
-    async def cleanup(self) -> None:
-        pass
+        options = await asyncio.get_event_loop().run_in_executor(None, _discover)
+        return {"options": options}
 
-    async def get_content(self) -> dict[str, Any]:
-        return {
-            "type": "chromecast",
-            "url": f"/api/plugins/{self.plugin_id}/data",
-            "config": {
-                "device_name": self.device_name,
-            },
-        }
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "url": f"/api/plugins/{self.plugin_id}/data",
-            "device_name": self.device_name,
-        }
-
-    async def fetch_service_data(
+    async def fetch(
         self,
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
+        """Return the now-playing payload the custom element's `data` binds to.
+
+        Shape (documented alongside the element in frontend/dist.js):
+            {"state": "no_devices" | "device_not_found" | "idle" | "error"
+                      | "<player state, lowercased>",  # playing / paused / buffering
+             "device_name"?, "app_name"?, "app_id"?,
+             "title"?, "artist"?, "album"?, "album_art_url"?,
+             "duration"?, "current_time"?,
+             "error"?, "available_devices"?}
+        """
         if not _PYCHROMECAST_AVAILABLE:
-            return {"error": "pychromecast is not installed"}
+            return {"state": "error", "error": "pychromecast is not installed"}
 
         return await asyncio.get_event_loop().run_in_executor(None, self._get_cast_status)
 
@@ -182,80 +204,3 @@ class ChromecastServicePlugin(ServicePlugin):
             (c for c in chromecasts if c.cast_info.friendly_name.lower() == name_lower),
             None,
         )
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        if not _PYCHROMECAST_AVAILABLE:
-            return False
-        return True
-
-    @classmethod
-    async def scan_type_options(cls, field_key: str) -> dict[str, Any] | None:
-        """Discover Chromecast devices for the device_name field."""
-        if field_key != "device_name":
-            return None
-        if not _PYCHROMECAST_AVAILABLE:
-            return {"options": [], "error": "pychromecast is not installed"}
-
-        def _discover():
-            chromecasts, browser = pychromecast.get_chromecasts(timeout=5)
-            pychromecast.discovery.stop_discovery(browser)
-            return [
-                {"value": c.cast_info.friendly_name, "label": c.cast_info.friendly_name}
-                for c in chromecasts
-            ]
-
-        options = await asyncio.get_event_loop().run_in_executor(None, _discover)
-        return {"options": options}
-
-    async def configure(self, config: dict[str, Any]) -> None:
-        await super().configure(config)
-        self.device_name = extract_config_value(config, "device_name", default="", converter=to_str)
-        self.discovery_timeout = extract_config_value(
-            config, "discovery_timeout", default=5, converter=to_int
-        )
-
-
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    return [ChromecastServicePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> ChromecastServicePlugin | None:
-    return create_service_plugin_instance(
-        ChromecastServicePlugin,
-        expected_type_id="chromecast",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=SERVICE_FIELDS,
-    )
-
-
-@hookimpl
-async def handle_plugin_config_update(
-    type_id: str,
-    config: dict[str, Any],
-    enabled: bool | None,
-    db_type: Any,
-    session: Any,
-) -> dict[str, Any] | None:
-    if type_id != "chromecast":
-        return None
-
-    manager_config = build_service_manager_config(
-        type_id="chromecast",
-        fields=SERVICE_FIELDS,
-        single_instance=False,
-        default_instance_name="Chromecast",
-    )
-
-    return await handle_plugin_config_update_generic(
-        type_id, config, enabled, db_type, session, manager_config
-    )

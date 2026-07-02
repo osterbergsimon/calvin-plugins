@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "chromecast",
   "name": "Chromecast Now Playing",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "service",
   "description": "Show what's currently casting on any Chromecast on your network — works with YouTube Music, Spotify, Netflix, Plex and more",
   "author": "Calvin Team",
@@ -17,18 +16,16 @@
     "music",
     "cast"
   ],
-  "python_dependencies": [
-    "pychromecast>=14.0"
-  ],
   "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
+    "packages": [
+      "pychromecast>=14.0"
+    ]
   },
   "files": {
     "include": [
       "plugin.py",
       "plugin.json",
-      "frontend/NowPlaying.vue"
+      "frontend/dist.js"
     ],
     "exclude": [
       "*.md",
@@ -37,7 +34,6 @@
     ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }

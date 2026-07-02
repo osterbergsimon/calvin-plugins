@@ -1,114 +1,52 @@
-"""Test plugin with frontend components for plugin installation testing."""
+"""Test plugin with a web-component frontend for plugin installation testing.
+
+The smallest legal web-component plugin under the Calvin plugin contract 1.0
+(the tier-2 escape hatch): the class declares `display_schema.kind:
+"web-component"`, and `frontend/dist.js` ships a hand-written custom element
+the host serves at /api/plugins/test_plugin_frontend/static/dist.js. The host
+mounts the element and assigns `fetch()`'s payload to its `data` property.
+"""
 
 from typing import Any
 
-from app.plugins.hooks import hookimpl
+from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ServicePlugin
-from app.plugins.sdk.service import (
-    ServiceConfigField,
-    build_service_plugin_metadata,
-    create_service_plugin_instance,
-)
-
-
-SERVICE_FIELDS = (
-    ServiceConfigField(
-        "message",
-        default="Hello from test plugin with frontend!",
-        converter=str,
-        transform=lambda value: str(value) if value else "Hello from test plugin with frontend!",
-    ),
-)
 
 
 class TestFrontendServicePlugin(ServicePlugin):
-    """Test service plugin with frontend components for installation testing."""
+    """Test service plugin with frontend assets for installation testing."""
 
-    @classmethod
-    def get_plugin_metadata(cls) -> dict[str, Any]:
-        """Get plugin metadata for registration."""
-        return build_service_plugin_metadata(
-            type_id="test_plugin_frontend",
-            name="Test Plugin with Frontend",
-            description="A test plugin with frontend components for testing frontend installation",
-            plugin_class=cls,
-            supports_multiple_instances=False,
-            common_config_schema={
-                "message": {
-                    "type": "string",
-                    "description": "Test message to display",
-                    "default": "Hello from test plugin with frontend!",
-                    "ui": {
-                        "component": "input",
-                        "placeholder": "Enter a message",
-                        "validation": {
-                            "required": False,
-                        },
-                    },
+    metadata = PluginMetadata(
+        type_id="test_plugin_frontend",
+        name="Test Plugin with Frontend",
+        description="A test plugin with frontend components for testing frontend installation",
+        supports_multiple_instances=False,
+        default_instance_name="Test Plugin with Frontend",
+        instance_config_schema={
+            "message": {
+                "type": "string",
+                "description": "Test message to display",
+                "default": "test plugin frontend OK",
+                "ui": {
+                    "component": "input",
+                    "placeholder": "Enter a message",
                 },
             },
-            display_schema={
-                "type": "api",
-                "api_endpoint": None,
-                "method": None,
-                "data_schema": None,
-                "render_template": "iframe",
-            },
-        )
-
-    def __init__(
-        self,
-        plugin_id: str,
-        name: str,
-        message: str = "Hello from test plugin with frontend!",
-        enabled: bool = True,
-    ):
-        super().__init__(plugin_id, name, enabled)
-        self.message = message
-
-    async def initialize(self) -> None:
-        """Initialize the plugin."""
-        pass
-
-    async def cleanup(self) -> None:
-        """Cleanup plugin resources."""
-        pass
-
-    async def get_content(self) -> dict[str, Any]:
-        """Get service content for display."""
-        return {
-            "type": "iframe",
-            "url": "about:blank",
-            "config": {
-                "message": self.message,
-            },
-        }
-
-    async def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin configuration."""
-        return True
-
-
-@hookimpl
-def register_plugin_types() -> list[dict[str, Any]]:
-    """Register TestFrontendServicePlugin type."""
-    return [TestFrontendServicePlugin.get_plugin_metadata()]
-
-
-@hookimpl
-def create_plugin_instance(
-    plugin_id: str,
-    type_id: str,
-    name: str,
-    config: dict[str, Any],
-) -> TestFrontendServicePlugin | None:
-    """Create a TestFrontendServicePlugin instance."""
-    return create_service_plugin_instance(
-        TestFrontendServicePlugin,
-        expected_type_id="test_plugin_frontend",
-        plugin_id=plugin_id,
-        type_id=type_id,
-        name=name,
-        config=config,
-        fields=SERVICE_FIELDS,
+        },
+        display_schema={
+            "kind": "web-component",
+            "element": "calvin-test-frontend",
+            "module": "dist.js",
+        },
     )
+
+    async def fetch(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the payload the host assigns to the custom element's `data`."""
+        return {
+            "message": self.config.get("message") or "test plugin frontend OK",
+            "plugin_id": self.plugin_id,
+        }

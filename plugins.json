@@ -6,7 +6,7 @@
       "name": "Chromecast Now Playing",
       "path": "chromecast",
       "description": "Show what's currently casting on any Chromecast on your network \u2014 works with YouTube Music, Spotify, Netflix, Plex and more",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -14,7 +14,7 @@
       "name": "Email (IMAP)",
       "path": "imap",
       "description": "Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share \u2192 Email.",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "backend"
     },
     {
@@ -22,7 +22,7 @@
       "name": "Image Processor",
       "path": "image-processor",
       "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "backend"
     },
     {
@@ -30,7 +30,7 @@
       "name": "Immich",
       "path": "immich",
       "description": "Photos from your self-hosted Immich photo library",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "image"
     },
     {
@@ -38,7 +38,7 @@
       "name": "Lychee",
       "path": "lychee",
       "description": "Photos from your self-hosted Lychee photo gallery",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "image"
     },
     {
@@ -46,7 +46,7 @@
       "name": "Mealie Meal Plan",
       "path": "mealie",
       "description": "Display weekly meal plan from Mealie recipe manager",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -54,7 +54,7 @@
       "name": "NASA APOD",
       "path": "nasa-apod",
       "description": "Astronomy Picture of the Day from NASA \u2014 daily curated space images with titles and descriptions",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "image"
     },
     {
@@ -62,7 +62,7 @@
       "name": "Picsum Photos",
       "path": "picsum",
       "description": "Random high-quality images from Picsum Photos (no API key required)",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "image"
     },
     {
@@ -70,7 +70,7 @@
       "name": "System Monitor",
       "path": "system-monitor",
       "description": "Live system metrics \u2014 CPU, memory, disk, temperature and network. Optimised for Raspberry Pi.",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -78,7 +78,7 @@
       "name": "Test Plugin",
       "path": "test-plugin",
       "description": "A basic test plugin for plugin installation testing",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -86,7 +86,7 @@
       "name": "Test Plugin with Frontend",
       "path": "test-plugin-frontend",
       "description": "A test plugin with frontend components for testing frontend installation",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -94,7 +94,7 @@
       "name": "Unsplash",
       "path": "unsplash",
       "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "image"
     },
     {
@@ -102,7 +102,7 @@
       "name": "Weather",
       "path": "weather",
       "description": "Display current weather conditions and forecast from OpenWeatherMap",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     },
     {
@@ -110,7 +110,7 @@
       "name": "Yr.no Weather",
       "path": "yr_weather",
       "description": "Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "type": "service"
     }
   ],

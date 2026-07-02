@@ -1,9 +1,8 @@
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "test_plugin_frontend",
   "name": "Test Plugin with Frontend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "service",
   "description": "A test plugin with frontend components for testing frontend installation",
   "author": "Calvin Test Suite",
@@ -14,14 +13,22 @@
     "test",
     "example",
     "service",
-    "frontend"
+    "frontend",
+    "web-component"
   ],
-  "dependencies": {
-    "python": ">=3.10",
-    "calvin": ">=1.0.0"
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json",
+      "frontend/dist.js"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
   },
   "requirements": {
-    "restart_required": true,
     "config_required": false
   }
 }
