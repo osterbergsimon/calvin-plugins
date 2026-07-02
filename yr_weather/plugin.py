@@ -154,7 +154,9 @@ class YrWeatherServicePlugin(ServicePlugin):
             "latitude": {
                 "type": "number",
                 "description": "Latitude (decimal degrees, max 4 decimals)",
-                "default": 59.9139,
+                # No default: an unconfigured coordinate must read as "unset" so
+                # merely enabling the plugin type can't auto-create a phantom
+                # instance. See validate_config. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "59.9139",
@@ -169,7 +171,7 @@ class YrWeatherServicePlugin(ServicePlugin):
             "longitude": {
                 "type": "number",
                 "description": "Longitude (decimal degrees, max 4 decimals)",
-                "default": 10.7522,
+                # No default — see latitude above. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "10.7522",
@@ -346,13 +348,25 @@ class YrWeatherServicePlugin(ServicePlugin):
 
     @classmethod
     async def validate_config(cls, config: dict[str, Any]) -> bool:
-        """Require coordinates that are present and in range."""
+        """Require real, in-range coordinates.
+
+        The schema declares no lat/lon defaults, so an unconfigured instance
+        normalizes to 0.0/0.0 (``to_float(None)``). Because the host normalizes
+        config *before* calling this hook, a key-presence check alone can't tell
+        "user supplied coordinates" from "defaults filled in" — so we reject the
+        0/0 sentinel (Null Island, never a real dashboard location). That stops a
+        bare plugin-type enable from auto-creating a phantom instance. A genuine
+        equator/meridian location (one axis 0, the other not) still passes.
+        (calvin-8p0)
+        """
         if "latitude" not in config or "longitude" not in config:
             return False
         normalized = cls.normalize_config(config)
         latitude = normalized.get("latitude")
         longitude = normalized.get("longitude")
         if latitude is None or longitude is None:
+            return False
+        if float(latitude) == 0.0 and float(longitude) == 0.0:
             return False
         return -90 <= float(latitude) <= 90 and -180 <= float(longitude) <= 180
 
