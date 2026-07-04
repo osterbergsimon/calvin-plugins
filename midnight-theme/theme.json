@@ -1,7 +1,7 @@
 {
   "id": "midnight",
   "name": "Midnight",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A deep midnight theme with purple and blue accents",
   "author": "Calvin Team",
   "variables": {
@@ -23,7 +23,21 @@
     "calendar-event-bg": "#7c3aed",
     "calendar-event-text": "#ffffff",
     "indicator-bg": "rgba(124, 58, 237, 0.8)",
-    "indicator-border": "rgba(255, 255, 255, 0.3)"
+    "indicator-border": "rgba(255, 255, 255, 0.3)",
+
+    "bg-0": "#080b10",
+    "bg-1": "#0d1117",
+    "bg-2": "#161b22",
+    "line": "#30363d",
+    "line-soft": "#242a31",
+    "ink": "#e6edf3",
+    "ink-2": "#b1bac4",
+    "ink-3": "#8b949e",
+    "focus": "#7c3aed",
+    "focus-ink": "#ffffff",
+    "ok": "#3fb950",
+    "warn": "#f59e0b",
+    "err": "#ef4444"
   },
   "dark_mode": {
     "bg-primary": "#0a0e14",
@@ -44,7 +58,20 @@
     "calendar-event-bg": "#8b5cf6",
     "calendar-event-text": "#ffffff",
     "indicator-bg": "rgba(139, 92, 246, 0.8)",
-    "indicator-border": "rgba(255, 255, 255, 0.3)"
+    "indicator-border": "rgba(255, 255, 255, 0.3)",
+
+    "bg-0": "#05070a",
+    "bg-1": "#0a0e14",
+    "bg-2": "#13171d",
+    "line": "#2d3748",
+    "line-soft": "#1f2833",
+    "ink": "#f0f4f8",
+    "ink-2": "#cbd5e0",
+    "ink-3": "#a0aec0",
+    "focus": "#8b5cf6",
+    "focus-ink": "#ffffff",
+    "ok": "#3fb950",
+    "warn": "#fbbf24",
+    "err": "#f87171"
   }
 }
-
