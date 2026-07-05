@@ -450,7 +450,12 @@ class YrWeatherServicePlugin(ServicePlugin):
             time_str = entry.get("time", "")
             if not time_str:
                 continue
-            entry_date = datetime.fromisoformat(time_str.replace("Z", "+00:00")).date()
+            # Skip a single malformed timestamp instead of aborting the whole
+            # forecast (which would blank the widget). See calvin-p7n.
+            try:
+                entry_date = datetime.fromisoformat(time_str.replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                continue
             days_ahead = (entry_date - today).days
             if days_ahead < 1 or days_ahead > self.forecast_days:
                 continue

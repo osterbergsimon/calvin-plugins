@@ -311,6 +311,23 @@ class TestFetchShaping:
         payload = await plugin.fetch()
         assert "error" in payload
 
+    def test_shape_skips_malformed_timestamp(self):
+        """One malformed timestamp is skipped, not fatal to the whole forecast (calvin-p7n)."""
+        instance = YrWeatherServicePlugin("yr-x", "Yr.no Weather")
+        instance.config = {
+            "latitude": 59.9139,
+            "longitude": 10.7522,
+            "forecast_days": 2,
+            "location": "Oslo, Norway",
+        }
+        response = _yr_response(days=2)
+        bad = _yr_entry(datetime.now().date() + timedelta(days=1), 9, 9.0, "rain")
+        bad["time"] = "not-a-timestamp"
+        response["properties"]["timeseries"].append(bad)
+        payload = instance._shape_for_display(response)
+        # The good days still render despite the malformed entry.
+        assert len(payload["forecast"]) == 2
+
 
 class TestSchemaPathConsistency:
     """Every *_path in the schemas resolves against a representative payload."""
