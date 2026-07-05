@@ -27,5 +27,5 @@ This theme customizes all standard CSS variables used throughout the Calvin inte
 
 ## Version
 
-1.0.0
+1.1.0
 
