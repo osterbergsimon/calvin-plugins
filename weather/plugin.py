@@ -70,6 +70,11 @@ def _glyph(mdi_icon: str) -> str:
     return MDI_TO_GLYPH.get(mdi_icon, "☁️")
 
 
+def _round_or_none(value: Any) -> int | None:
+    """Round a numeric field, or None if it's missing/non-numeric (calvin-p7n)."""
+    return round(value) if isinstance(value, (int, float)) else None
+
+
 class WeatherServicePlugin(ServicePlugin):
     """Weather service plugin for displaying current conditions and forecast."""
 
@@ -329,14 +334,19 @@ class WeatherServicePlugin(ServicePlugin):
         forecast_data: dict[str, Any],
     ) -> dict[str, Any]:
         """Shape raw OpenWeatherMap responses into the display-schema payload."""
-        icon = _owm_icon(current_data["weather"][0].get("icon"))
+        # Guard against an unexpected 200-response shape (OWM schema change, free-
+        # tier partial response, empty weather array) — degrade gracefully instead
+        # of raising KeyError/IndexError and blanking the widget. See calvin-p7n.
+        weather0 = (current_data.get("weather") or [{}])[0]
+        main = current_data.get("main") or {}
+        icon = _owm_icon(weather0.get("icon"))
         wind_speed = current_data.get("wind", {}).get("speed", 0)
         current = {
-            "temperature": round(current_data["main"]["temp"]),
-            "feels_like": round(current_data["main"]["feels_like"]),
-            "humidity": current_data["main"]["humidity"],
-            "pressure": current_data["main"]["pressure"],
-            "description": current_data["weather"][0]["description"],
+            "temperature": _round_or_none(main.get("temp")),
+            "feels_like": _round_or_none(main.get("feels_like")),
+            "humidity": main.get("humidity"),
+            "pressure": main.get("pressure"),
+            "description": weather0.get("description", ""),
             "icon": icon,
             "glyph": _glyph(icon),
             "wind_speed": self._wind_to_ms(wind_speed),
@@ -348,10 +358,17 @@ class WeatherServicePlugin(ServicePlugin):
             lambda: {"temps": [], "descriptions": [], "icons": []}
         )
         for item in forecast_data.get("list", []):
-            date_str = datetime.fromtimestamp(item["dt"]).date().isoformat()
-            forecast_by_date[date_str]["temps"].append(item["main"]["temp"])
-            forecast_by_date[date_str]["descriptions"].append(item["weather"][0]["description"])
-            forecast_by_date[date_str]["icons"].append(item["weather"][0]["icon"])
+            # Skip a malformed entry rather than aborting the whole forecast.
+            try:
+                date_str = datetime.fromtimestamp(item["dt"]).date().isoformat()
+                item_weather = (item.get("weather") or [{}])[0]
+                forecast_by_date[date_str]["temps"].append(item["main"]["temp"])
+                forecast_by_date[date_str]["descriptions"].append(
+                    item_weather.get("description", "")
+                )
+                forecast_by_date[date_str]["icons"].append(item_weather.get("icon"))
+            except (KeyError, IndexError, TypeError, ValueError, OSError):
+                continue
 
         forecast = []
         today = datetime.now().date()

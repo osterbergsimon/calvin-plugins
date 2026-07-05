@@ -280,6 +280,37 @@ class TestFetchShaping:
         payload = await plugin.fetch()
         assert "error" in payload
 
+    def test_shape_survives_empty_weather_and_missing_main(self):
+        """An empty weather array / missing main degrades instead of blanking (calvin-p7n)."""
+        instance = WeatherServicePlugin("weather-x", "Weather")
+        instance.config = {
+            "api_key": "k",
+            "location": "London, UK",
+            "units": "metric",
+            "forecast_days": 2,
+        }
+        partial = {"name": "London", "sys": {"country": "GB"}, "weather": [], "main": {}}
+        payload = instance._shape_for_display(partial, {"list": []})
+        current = payload["current"]
+        assert current["temperature"] is None
+        assert current["feels_like"] is None
+        assert current["description"] == ""
+        assert current["icon"] in KNOWN_WEATHER_ICONS  # cloudy fallback
+
+    def test_forecast_skips_malformed_entries(self):
+        """A malformed forecast entry is skipped; well-formed days are kept (calvin-p7n)."""
+        instance = WeatherServicePlugin("weather-x", "Weather")
+        instance.config = {
+            "api_key": "k",
+            "location": "x",
+            "units": "metric",
+            "forecast_days": 2,
+        }
+        forecast = _owm_forecast_response(days=2)
+        forecast["list"].append({"dt": "not-an-int", "main": {}, "weather": []})
+        payload = instance._shape_for_display(_owm_current_response(), forecast)
+        assert len(payload["forecast"]) == 2
+
 
 class TestSchemaPathConsistency:
     """Every *_path in the schemas resolves against a representative payload."""
