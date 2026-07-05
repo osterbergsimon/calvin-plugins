@@ -515,12 +515,24 @@ class ImapBackendPlugin(BackendPlugin):
                 "message": "Email address and password are required",
             }
 
+        # imaplib is fully synchronous; run it off the event loop with a socket
+        # timeout so a firewalled/unreachable host can't freeze the whole
+        # dashboard for the OS TCP timeout (~75-130s). See calvin-8kn.
+        def _probe() -> None:
+            mail = imaplib.IMAP4_SSL(imap_server, imap_port, timeout=10)
+            try:
+                mail.login(email_address, email_password)
+                mail.select("INBOX")
+                mail.close()
+            finally:
+                # Best-effort cleanup — don't let logout mask a login/select error.
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
         try:
-            mail = imaplib.IMAP4_SSL(imap_server, imap_port)
-            mail.login(email_address, email_password)
-            mail.select("INBOX")
-            mail.close()
-            mail.logout()
+            await asyncio.to_thread(_probe)
 
             return {
                 "success": True,

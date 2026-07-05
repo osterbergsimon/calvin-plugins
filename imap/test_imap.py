@@ -5,6 +5,7 @@ Run from the calvin backend directory so `app.*` imports resolve:
     uv run pytest ../../calvin-plugins/imap/test_imap.py
 """
 
+import asyncio
 import imaplib
 import importlib.util
 import types
@@ -305,8 +306,27 @@ class TestConnectionTest:
             {"email_address": "test@example.com", "email_password": "secret"}
         )
         assert result["success"] is True
-        ssl_factory.assert_called_once_with("imap.gmail.com", 993)
+        # A socket timeout must be applied so an unreachable host can't hang the
+        # event loop (calvin-8kn).
+        ssl_factory.assert_called_once_with("imap.gmail.com", 993, timeout=10)
         mail.login.assert_called_once_with("test@example.com", "secret")
+
+    async def test_connection_runs_off_the_event_loop(self, monkeypatch):
+        """The blocking imaplib work must be offloaded via asyncio.to_thread (calvin-8kn)."""
+        monkeypatch.setattr(imaplib, "IMAP4_SSL", MagicMock(return_value=MagicMock()))
+        called = {}
+        real_to_thread = asyncio.to_thread
+
+        async def spy(func, *args, **kwargs):
+            called["used"] = True
+            return await real_to_thread(func, *args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "to_thread", spy)
+        result = await ImapBackendPlugin.test_connection(
+            {"email_address": "test@example.com", "email_password": "secret"}
+        )
+        assert result["success"] is True
+        assert called.get("used") is True
 
     async def test_auth_failure_reported(self, monkeypatch):
         monkeypatch.setattr(
