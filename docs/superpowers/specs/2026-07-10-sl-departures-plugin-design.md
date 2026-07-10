@@ -80,24 +80,40 @@ Powers a "Test Connection" `ui_action` (`type: "test"`).
 {
   "stop": "Tappström",
   "departures": [
-    {"glyph": "🚌", "label": "176 · Brommaplan", "display": "4 min", "status": "ok"},
-    {"glyph": "🚌", "label": "177 · Brommaplan", "display": "9 min", "status": "warn"}
+    {"label": "176 · Brommaplan", "display": "4 min", "status": "ok"},
+    {"label": "177 · Brommaplan", "display": "9 min", "status": "warn"}
   ],
-  "clockbar": {"glyph": "🚌", "value": "176·4′ · 177·9′", "status": "ok"},
+  "clockbar": {"label": "Tappström", "value": "176·4′ · 177·9′", "status": "ok"},
   "next_count": 2
 }
 ```
 
 Per-departure shaping:
 
-- `glyph`: emoji by `transport_mode` — 🚌 bus, 🚇 metro, 🚆 train/commuter,
-  🚊 tram, 🚢 ship. Resolved in Python (theme-independent, avoids depending on
-  an mdi icon whitelist — same approach `yr_weather` uses for its glyph).
-- `label`: `"{designation} · {destination}"`.
+- `label`: `"{designation} · {destination}"`. The line number is the identity
+  (as on SL's own signage), carried as text in the theme's `var(--ink)` /
+  `var(--font-ui)`.
 - `display`: SL's `display` string, else computed minutes from `expected`.
 - `status`: `ok` normally; `warn` if a deviation/delay is present; `error` if
-  cancelled (`state` indicates cancelled). Color on the wall = disruption
-  only.
+  cancelled (`state` indicates cancelled).
+
+### Visual theme
+
+Match the main app exactly by using the built-in `StatusRenderer` and adding
+nothing that fights it:
+
+- **No decorative icons/emoji.** The renderer draws the `icon` slot as plain
+  text, and its design rule is "color appears only when something needs
+  attention — `ok` stays monochrome." A colorful mode emoji (🚌) would put
+  non-semantic color on the wall and break that discipline. Transport mode is
+  already implied by the filtered lines; the line designation leads each row.
+- **Color reserved for disruptions.** Only `warn`/`error` tint (via
+  `var(--warn)` / `var(--err)`) and light the attention lamp. Normal
+  departures are monochrome.
+- Typography, ink colors, hairline rows and the active theme (e.g. midnight)
+  come for free from `StatusRenderer` — no plugin-side styling, no
+  web-component. This is the whole reason we chose a built-in renderer over a
+  custom board.
 
 ### Panel — `display_schema`
 
@@ -109,7 +125,6 @@ display_schema={
     "layout": "list",
     "data_path": "$.departures",
     "item": {
-        "icon_path": "$.glyph",
         "label_path": "$.label",
         "value_path": "$.display",
         "status_path": "$.status",
@@ -129,7 +144,7 @@ Empty board (no filtered departures in window) shapes a single quiet item
 statusbar_schema={
     "kind": "status",
     "item": {
-        "icon_path": "$.clockbar.glyph",
+        "label_path": "$.clockbar.label",
         "value_path": "$.clockbar.value",
         "status_path": "$.clockbar.status",
     },
@@ -137,13 +152,15 @@ statusbar_schema={
 }
 ```
 
+- `clockbar.label` is the stop name — renders as the theme's uppercase
+  micro-label (`var(--ink-3)`), so the strip self-identifies without an icon.
 - `clockbar.value` shows the **next** filtered departure as `"{line}·{min}′"`.
 - When `clockbar_show_following` is true and a second filtered departure
   exists, append it: `"176·4′ · 177·9′"`. Each entry carries its own line, so
   a mixed-line pair reads correctly.
 - `clockbar.status` reflects the next departure (warn/error if delayed or
   cancelled), so a disruption lights the strip.
-- No upcoming filtered departure → quiet `🚌 —`.
+- No upcoming filtered departure → quiet `—`.
 
 One instance → one panel + one clock-bar strip. A second stop — or a second
 *view* of the same stop with different filters (e.g. a bus board and a metro
@@ -171,11 +188,12 @@ Run from the Calvin backend (`cd ../calvin/backend && uv run pytest
   direction domain).
 - **Filtering:** `lines` (single + multiple, e.g. `176, 177`), `modes`,
   `direction`; sort + `max_departures` truncation.
-- **Shaping:** `_shape_for_display` against the `status` schema paths — glyph
-  per mode, label format, `display` fallback from `expected`, deviation →
-  `warn`, cancellation → `error`.
-- **Clock bar:** next-only vs next+following (`clockbar_show_following`),
-  mixed-line pair formatting, empty → `🚌 —`.
+- **Shaping:** `_shape_for_display` against the `status` schema paths — label
+  format (`{designation} · {destination}`), `display` fallback from
+  `expected`, deviation → `warn`, cancellation → `error`, and that no icon/
+  color is emitted for on-time departures (theme discipline).
+- **Clock bar:** stop-name label, next-only vs next+following
+  (`clockbar_show_following`), mixed-line pair formatting, empty → `—`.
 - **`test_connection`:** single match, multi-match (candidate list), no match,
   network error — all against a mocked Sites response.
 
