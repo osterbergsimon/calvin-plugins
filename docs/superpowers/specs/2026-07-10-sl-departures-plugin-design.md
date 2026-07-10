@@ -41,7 +41,7 @@ Be a good API citizen: no key means shared infrastructure — use a sane
 | `stop_name` | string | yes | e.g. `"Tappström"`. Resolved to a site id on Test. |
 | `site_id` | integer | no | Auto-filled/cached after resolution; if set, wins over `stop_name`. |
 | `lines` | string | no | Comma list, e.g. `"176, 177"`. Empty = all lines. Matched against `designation`. Placeholder demonstrates the multi-line form. |
-| `modes` | multi-select | no | `bus` / `metro` / `train` / `tram` / `ship`. Empty = all modes. |
+| `modes` | string | no | Comma list of `bus` / `metro` / `train` / `tram` / `ship`, e.g. `"bus, train"`. Empty = all modes. (Comma string, not a multi-select — no such UI component exists in this repo.) |
 | `direction` | select | no | `Any` / `1` / `2` (SL's arbitrary direction code). Default `Any`; most users filter by line instead. |
 | `max_departures` | integer | no | Rows on the panel. Default `8`. |
 | `forecast_minutes` | integer | no | API time window. Default `60`. |
