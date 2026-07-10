@@ -348,3 +348,42 @@ class SLDeparturesServicePlugin(ServicePlugin):
             return self._shape_for_display({"error": message})
         raw = await self._fetch_departures(site_id)
         return self._shape_for_display(raw)
+
+    @classmethod
+    async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the stop and confirm SL is reachable, showing the next departure."""
+        normalized = cls.normalize_config(config)
+        stop_name = str(normalized.get("stop_name") or "").strip()
+        try:
+            site_id: int | None = int(normalized.get("site_id")) or None
+        except (TypeError, ValueError):
+            site_id = None
+
+        if not stop_name and not site_id:
+            return {"success": False, "message": "Enter a stop name (or a site id) first"}
+
+        try:
+            if site_id is None:
+                sites = await cls._fetch_sites()
+                matches = cls._match_sites(sites, stop_name)
+                if not matches:
+                    return {"success": False, "message": f"No SL stop matches '{stop_name}' — check the spelling"}
+                if len(matches) > 1:
+                    listed = ", ".join(f"{m['id']} {m['name']}" for m in matches[:6])
+                    return {"success": False, "message": f"Several stops match '{stop_name}': {listed} — set the site id"}
+                site_id = matches[0]["id"]
+                stop_name = matches[0]["name"]
+
+            raw = await cls._get_departures(site_id, 60)
+            departures = raw.get("departures", []) if isinstance(raw, dict) else []
+            if departures:
+                first = departures[0]
+                line = str((first.get("line") or {}).get("designation") or "")
+                nxt = f"{line} to {first.get('destination')} in {first.get('display')}"
+                message = f"{stop_name} (site {site_id}) — next: {nxt}"
+            else:
+                message = f"{stop_name} (site {site_id}) — no departures in the next hour"
+            return {"success": True, "message": message, "site_id": site_id}
+        except httpx.HTTPError:
+            logger.exception("[SL Test] Error contacting SL")
+            return {"success": False, "message": "Couldn't reach SL — check your network"}

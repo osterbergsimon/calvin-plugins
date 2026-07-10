@@ -301,3 +301,41 @@ class TestFetch:
         assert called_url.endswith("/v1/sites/3002/departures")
         assert client.get.call_args.kwargs["params"] == {"forecast": 60}
         assert client_cls.call_args.kwargs["timeout"] == 30.0
+
+
+class TestConnection:
+    async def test_missing_stop_fails_fast(self):
+        result = await SLDeparturesServicePlugin.test_connection({})
+        assert result["success"] is False
+
+    async def test_single_match_reports_next_departure(self, monkeypatch):
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        monkeypatch.setattr(
+            SLDeparturesServicePlugin, "_get_departures",
+            AsyncMock(return_value={"departures": [_dep(line="176", dest="Stenhamra", display="3 min")]}),
+        )
+        result = await SLDeparturesServicePlugin.test_connection({"stop_name": "Tappström"})
+        assert result["success"] is True
+        assert result["site_id"] == 3002
+        assert "176" in result["message"] and "Stenhamra" in result["message"]
+
+    async def test_ambiguous_lists_candidates(self, monkeypatch):
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        result = await SLDeparturesServicePlugin.test_connection({"stop_name": "central"})
+        assert result["success"] is False
+        assert "9001" in result["message"] and "5000" in result["message"]
+
+    async def test_no_match(self, monkeypatch):
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        result = await SLDeparturesServicePlugin.test_connection({"stop_name": "Nowhere"})
+        assert result["success"] is False
+        assert "Nowhere" in result["message"]
+
+    async def test_network_error_reported(self, monkeypatch):
+        async def boom(*args, **kwargs):
+            raise httpx.ConnectError("no route")
+
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", boom)
+        result = await SLDeparturesServicePlugin.test_connection({"stop_name": "Tappström"})
+        assert result["success"] is False
+        assert "reach SL" in result["message"]
