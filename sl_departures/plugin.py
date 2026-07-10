@@ -124,5 +124,58 @@ class SLDeparturesServicePlugin(ServicePlugin):
     def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         super().__init__(plugin_id, name, enabled)
 
+    # Config accessors — values live in self.config (schema-normalized).
+
+    @property
+    def stop_name(self) -> str:
+        return str(self.config.get("stop_name") or "").strip()
+
+    @property
+    def site_id(self) -> int | None:
+        try:
+            value = int(self.config.get("site_id"))
+        except (TypeError, ValueError):
+            return None
+        return value or None
+
+    @property
+    def lines(self) -> set[str]:
+        return {p.strip() for p in str(self.config.get("lines") or "").split(",") if p.strip()}
+
+    @property
+    def modes(self) -> set[str]:
+        return {p.strip().upper() for p in str(self.config.get("modes") or "").split(",") if p.strip()}
+
+    @property
+    def direction(self) -> str:
+        value = str(self.config.get("direction") or "Any").strip()
+        return value if value in ("1", "2") else "Any"
+
+    @property
+    def max_departures(self) -> int:
+        return min(max(int(self.config.get("max_departures") or 8), 1), 30)
+
+    @property
+    def forecast_minutes(self) -> int:
+        return min(max(int(self.config.get("forecast_minutes") or 60), 5), 180)
+
+    @property
+    def clockbar_show_following(self) -> bool:
+        return bool(self.config.get("clockbar_show_following", True))
+
+    @classmethod
+    async def validate_config(cls, config: dict[str, Any]) -> bool:
+        """Require a stop name or a site id; direction must be Any/1/2."""
+        normalized = cls.normalize_config(config)
+        stop_name = str(normalized.get("stop_name") or "").strip()
+        try:
+            has_site = bool(int(normalized.get("site_id")))
+        except (TypeError, ValueError):
+            has_site = False
+        if not stop_name and not has_site:
+            return False
+        direction = str(normalized.get("direction") or "Any").strip()
+        return direction in ("Any", "1", "2")
+
     async def fetch(self, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
         return {"departures": [], "clockbar": {"label": "", "value": "—", "status": "ok"}}

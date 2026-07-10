@@ -58,3 +58,48 @@ class TestContractShape:
 
     def test_is_service_plugin(self):
         assert issubclass(SLDeparturesServicePlugin, ServicePlugin)
+
+
+@pytest.fixture
+async def plugin():
+    instance = SLDeparturesServicePlugin(plugin_id="sl-test", name="SL", enabled=True)
+    await instance.configure(
+        {
+            "stop_name": " Tappström ",
+            "lines": "176, 177",
+            "modes": "bus, Train",
+            "direction": "Any",
+            "max_departures": "8",
+            "forecast_minutes": "60",
+        }
+    )
+    return instance
+
+
+class TestConfig:
+    async def test_accessors_normalize(self, plugin):
+        assert plugin.stop_name == "Tappström"
+        assert plugin.lines == {"176", "177"}
+        assert plugin.modes == {"BUS", "TRAIN"}
+        assert plugin.direction == "Any"
+        assert plugin.max_departures == 8
+        assert plugin.forecast_minutes == 60
+        assert plugin.clockbar_show_following is True
+        assert plugin.site_id is None  # 0/blank means unset
+
+    async def test_site_id_override(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "site_id": "3002"})
+        assert instance.site_id == 3002
+
+    async def test_bounds_clamped(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "max_departures": 999, "forecast_minutes": 1})
+        assert instance.max_departures == 30
+        assert instance.forecast_minutes == 5
+
+    async def test_validate_config(self):
+        assert await SLDeparturesServicePlugin.validate_config({"stop_name": "Tappström"}) is True
+        assert await SLDeparturesServicePlugin.validate_config({"site_id": 3002}) is True
+        assert await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 0}) is False
+        assert await SLDeparturesServicePlugin.validate_config({"stop_name": "x", "direction": "9"}) is False
