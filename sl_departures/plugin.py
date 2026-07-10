@@ -20,6 +20,10 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
     BASE_URL = "https://transport.integration.sl.se"
 
+    _sites_cache: list[dict[str, Any]] | None = None
+    _sites_cache_at: float = 0.0
+    _SITES_TTL_SECONDS = 6 * 3600
+
     metadata = PluginMetadata(
         type_id="sl_departures",
         name="SL Departures",
@@ -260,6 +264,58 @@ class SLDeparturesServicePlugin(ServicePlugin):
             "departures": [self._shape_departure(dep) for dep in filtered],
             "clockbar": self._shape_clockbar(filtered),
         }
+
+    @staticmethod
+    def _match_sites(sites: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+        """Match a typed stop name against the Sites list: exact preferred, else contains."""
+        needle = (query or "").strip().lower()
+        if not needle:
+            return []
+        exact = [
+            {"id": s.get("id"), "name": s.get("name")}
+            for s in sites
+            if str(s.get("name") or "").strip().lower() == needle
+        ]
+        if exact:
+            return exact
+        return [
+            {"id": s.get("id"), "name": s.get("name")}
+            for s in sites
+            if needle in str(s.get("name") or "").strip().lower()
+        ]
+
+    @classmethod
+    async def _fetch_sites(cls) -> list[dict[str, Any]]:
+        """Fetch (and cache) the full SL Sites list. Shared across instances."""
+        import time
+
+        now = time.time()
+        if cls._sites_cache is not None and (now - cls._sites_cache_at) < cls._SITES_TTL_SECONDS:
+            return cls._sites_cache
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{cls.BASE_URL}/v1/sites")
+            response.raise_for_status()
+            cls._sites_cache = response.json()
+            cls._sites_cache_at = now
+        return cls._sites_cache
+
+    async def _resolve_site(self) -> tuple[int | None, str | None, list[dict[str, Any]]]:
+        """Resolve the configured stop to (site_id, name, candidates).
+
+        site_id override wins. Otherwise fuzzy-match the name: a single match
+        resolves, multiple matches return candidates, none/error returns empty.
+        """
+        if self.site_id:
+            return self.site_id, self.stop_name, []
+        try:
+            sites = await self._fetch_sites()
+        except httpx.HTTPError:
+            logger.exception("[SL] Error fetching sites")
+            return None, None, []
+        matches = self._match_sites(sites, self.stop_name)
+        if len(matches) == 1:
+            return matches[0]["id"], matches[0]["name"], []
+        return None, None, matches
 
     async def fetch(self, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
         return {"departures": [], "clockbar": {"label": "", "value": "—", "status": "ok"}}

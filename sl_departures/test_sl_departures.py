@@ -200,3 +200,45 @@ class TestShaping:
         assert shaped["error"] == "Couldn't reach SL — retrying"
         assert shaped["departures"] == []
         assert shaped["clockbar"] == {"label": "Tappström", "value": "—", "status": "ok"}
+
+
+_SITES = [
+    {"id": 3002, "name": "Tappström"},
+    {"id": 1002, "name": "Stockholm City"},
+    {"id": 9001, "name": "T-Centralen"},
+    {"id": 5000, "name": "Centralnav"},
+]
+
+
+class TestSiteResolution:
+    def test_match_exact_preferred(self):
+        matches = SLDeparturesServicePlugin._match_sites(_SITES, "Tappström")
+        assert matches == [{"id": 3002, "name": "Tappström"}]
+
+    def test_match_contains_multiple(self):
+        matches = SLDeparturesServicePlugin._match_sites(_SITES, "central")
+        assert {m["id"] for m in matches} == {9001, 5000}
+
+    def test_match_none(self):
+        assert SLDeparturesServicePlugin._match_sites(_SITES, "Nowhere") == []
+
+    async def test_resolve_uses_site_id_override(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "Tappström", "site_id": 3002})
+        site_id, name, candidates = await instance._resolve_site()
+        assert (site_id, candidates) == (3002, [])
+
+    async def test_resolve_single_match(self, monkeypatch):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "Tappström"})
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        site_id, name, candidates = await instance._resolve_site()
+        assert (site_id, name, candidates) == (3002, "Tappström", [])
+
+    async def test_resolve_ambiguous_returns_candidates(self, monkeypatch):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "central"})
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        site_id, name, candidates = await instance._resolve_site()
+        assert site_id is None
+        assert {c["id"] for c in candidates} == {9001, 5000}
