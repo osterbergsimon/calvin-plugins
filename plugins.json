@@ -66,6 +66,14 @@
       "type": "image"
     },
     {
+      "id": "sl_departures",
+      "name": "SL Departures",
+      "path": "sl_departures",
+      "description": "Live SL public-transport departures for a Stockholm stop, filterable by line, mode and direction",
+      "version": "1.0.0",
+      "type": "service"
+    },
+    {
       "id": "system_monitor",
       "name": "System Monitor",
       "path": "system-monitor",
