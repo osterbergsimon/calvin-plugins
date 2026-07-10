@@ -242,3 +242,57 @@ class TestSiteResolution:
         site_id, name, candidates = await instance._resolve_site()
         assert site_id is None
         assert {c["id"] for c in candidates} == {9001, 5000}
+
+
+class TestFetch:
+    async def test_fetch_resolves_then_shapes(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            SLDeparturesServicePlugin, "_resolve_site",
+            AsyncMock(return_value=(3002, "Tappström", [])),
+        )
+        raw = {"departures": [_dep(line="176", dest="Stenhamra", display="3 min")]}
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_get_departures", AsyncMock(return_value=raw))
+        shaped = await plugin.fetch()
+        assert shaped["stop"] == "Tappström"
+        assert shaped["departures"][0]["label"] == "176 · Stenhamra"
+
+    async def test_fetch_ambiguous_stop_returns_error(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            SLDeparturesServicePlugin, "_resolve_site",
+            AsyncMock(return_value=(None, None, [{"id": 9001, "name": "T-Centralen"},
+                                                 {"id": 5000, "name": "Centralnav"}])),
+        )
+        shaped = await plugin.fetch()
+        assert "T-Centralen" in shaped["error"]
+        assert shaped["departures"] == []
+
+    async def test_fetch_unresolved_stop_returns_error(self, plugin, monkeypatch):
+        monkeypatch.setattr(
+            SLDeparturesServicePlugin, "_resolve_site",
+            AsyncMock(return_value=(None, None, [])),
+        )
+        shaped = await plugin.fetch()
+        assert "Tappström" in shaped["error"]
+
+    async def test_fetch_departures_network_error_is_wrapped(self, plugin, monkeypatch):
+        async def boom(*args, **kwargs):
+            raise httpx.ConnectError("no route")
+
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_get_departures", boom)
+        raw = await plugin._fetch_departures(3002)
+        assert raw["error"].startswith("Couldn't reach SL")
+
+    async def test_get_departures_calls_api(self, monkeypatch):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"departures": []}
+        response.raise_for_status = MagicMock()
+        client = AsyncMock()
+        client.get.return_value = response
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = False
+        monkeypatch.setattr(httpx, "AsyncClient", MagicMock(return_value=client))
+        raw = await SLDeparturesServicePlugin._get_departures(3002, 60)
+        assert raw == {"departures": []}
+        called_url = client.get.call_args[0][0]
+        assert called_url.endswith("/v1/sites/3002/departures")

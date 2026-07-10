@@ -317,5 +317,34 @@ class SLDeparturesServicePlugin(ServicePlugin):
             return matches[0]["id"], matches[0]["name"], []
         return None, None, matches
 
+    @classmethod
+    async def _get_departures(cls, site_id: int, forecast: int = 60) -> dict[str, Any]:
+        """Raw departures for a site from the SL Transport API (may raise httpx errors)."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{cls.BASE_URL}/v1/sites/{site_id}/departures",
+                params={"forecast": forecast},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def _fetch_departures(self, site_id: int) -> dict[str, Any]:
+        """Departures for a site, with network errors turned into a display error."""
+        try:
+            return await self._get_departures(site_id, self.forecast_minutes)
+        except httpx.HTTPError:
+            logger.exception("[SL] Error fetching departures")
+            return {"error": "Couldn't reach SL — retrying"}
+
     async def fetch(self, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
-        return {"departures": [], "clockbar": {"label": "", "value": "—", "status": "ok"}}
+        """Resolve the stop, fetch its departures, and shape for the status renderers."""
+        site_id, _name, candidates = await self._resolve_site()
+        if site_id is None:
+            if candidates:
+                listed = ", ".join(f"{c['id']} {c['name']}" for c in candidates[:6])
+                message = f"Several stops match '{self.stop_name}': {listed} — set the site id in settings"
+            else:
+                message = f"No SL stop matches '{self.stop_name}' — check the spelling in settings"
+            return self._shape_for_display({"error": message})
+        raw = await self._fetch_departures(site_id)
+        return self._shape_for_display(raw)
