@@ -201,5 +201,65 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
         return sorted(departures, key=when)[: self.max_departures]
 
+    @staticmethod
+    def _status_for(dep: dict[str, Any]) -> str:
+        """Color on the wall = disruption only: cancelled -> error, deviations -> warn."""
+        if str(dep.get("state") or "").upper() == "CANCELLED":
+            return "error"
+        if dep.get("deviations"):
+            return "warn"
+        return "ok"
+
+    @classmethod
+    def _shape_departure(cls, dep: dict[str, Any]) -> dict[str, Any]:
+        """One panel row: '176 · Stenhamra' with SL's human display time."""
+        designation = str((dep.get("line") or {}).get("designation") or "").strip()
+        destination = str(dep.get("destination") or "").strip()
+        label = " · ".join(part for part in (designation, destination) if part)
+        return {
+            "label": label,
+            "display": str(dep.get("display") or "").strip(),
+            "status": cls._status_for(dep),
+        }
+
+    @staticmethod
+    def _compact_display(dep: dict[str, Any]) -> str:
+        """Clock-bar entry: '176·3′' ('N min' -> 'N′', 'Nu' kept as-is)."""
+        designation = str((dep.get("line") or {}).get("designation") or "").strip()
+        short = str(dep.get("display") or "").strip().replace(" min", "′")
+        return f"{designation}·{short}" if short else designation
+
+    def _shape_clockbar(self, departures: list[dict[str, Any]]) -> dict[str, Any]:
+        """Next (and optionally following) filtered departure, stop name as label."""
+        if not departures:
+            return {"label": self.stop_name, "value": "—", "status": "ok"}
+        count = 2 if self.clockbar_show_following else 1
+        value = " · ".join(self._compact_display(dep) for dep in departures[:count])
+        return {"label": self.stop_name, "value": value, "status": self._status_for(departures[0])}
+
+    def _shape_for_display(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Filter/sort raw SL departures and shape for the status renderers."""
+        if isinstance(raw, dict) and raw.get("error"):
+            return {
+                "stop": self.stop_name,
+                "departures": [],
+                "clockbar": self._shape_clockbar([]),
+                "error": raw["error"],
+            }
+        raw_departures = raw.get("departures", []) if isinstance(raw, dict) else (raw or [])
+        filtered = self._sort_and_limit(self._filter_departures(raw_departures))
+        if not filtered:
+            empty = {
+                "label": f"No departures in the next {self.forecast_minutes} min",
+                "display": "",
+                "status": "ok",
+            }
+            return {"stop": self.stop_name, "departures": [empty], "clockbar": self._shape_clockbar([])}
+        return {
+            "stop": self.stop_name,
+            "departures": [self._shape_departure(dep) for dep in filtered],
+            "clockbar": self._shape_clockbar(filtered),
+        }
+
     async def fetch(self, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
         return {"departures": [], "clockbar": {"label": "", "value": "—", "status": "ok"}}

@@ -153,3 +153,49 @@ class TestFiltering:
         ]
         ordered = instance._sort_and_limit(deps)
         assert [d["expected"] for d in ordered] == ["2026-07-10T23:45:00", "2026-07-10T23:48:00"]
+
+
+class TestShaping:
+    async def test_shape_departure_label_and_status(self, plugin):
+        assert plugin._status_for(_dep()) == "ok"
+        assert plugin._status_for(_dep(state="CANCELLED")) == "error"
+        assert plugin._status_for(_dep(deviations=[{"importance_level": 5}])) == "warn"
+        shaped = plugin._shape_departure(_dep(line="176", dest="Stenhamra", display="3 min"))
+        assert shaped == {"label": "176 · Stenhamra", "display": "3 min", "status": "ok"}
+
+    async def test_full_shape_filters_sorts_and_builds_clockbar(self, plugin):
+        raw = {
+            "departures": [
+                _dep(line="317", mode="BUS", expected="2026-07-10T23:40:00"),  # filtered out
+                _dep(line="177", mode="BUS", dest="Skärvik", display="6 min",
+                     expected="2026-07-10T23:51:00"),
+                _dep(line="176", mode="BUS", dest="Stenhamra", display="3 min",
+                     expected="2026-07-10T23:48:00"),
+            ]
+        }
+        shaped = plugin._shape_for_display(raw)
+        assert shaped["stop"] == "Tappström"
+        assert [d["label"] for d in shaped["departures"]] == ["176 · Stenhamra", "177 · Skärvik"]
+        # clock bar shows next + following (toggle default on), each with its own line
+        assert shaped["clockbar"] == {"label": "Tappström", "value": "176·3′ · 177·6′", "status": "ok"}
+
+    async def test_clockbar_next_only_when_toggle_off(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "Tappström", "clockbar_show_following": False})
+        raw = {"departures": [_dep(line="176", display="3 min", expected="2026-07-10T23:48:00"),
+                              _dep(line="177", display="6 min", expected="2026-07-10T23:51:00")]}
+        assert instance._shape_for_display(raw)["clockbar"]["value"] == "176·3′"
+
+    async def test_empty_board_message_and_clockbar(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "Tappström", "forecast_minutes": 60})
+        shaped = instance._shape_for_display({"departures": []})
+        assert shaped["departures"] == [
+            {"label": "No departures in the next 60 min", "display": "", "status": "ok"}
+        ]
+        assert shaped["clockbar"] == {"label": "Tappström", "value": "—", "status": "ok"}
+
+    async def test_error_passes_through(self, plugin):
+        shaped = plugin._shape_for_display({"error": "Couldn't reach SL — retrying"})
+        assert shaped["error"] == "Couldn't reach SL — retrying"
+        assert shaped["departures"] == []
