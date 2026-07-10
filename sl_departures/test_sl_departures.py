@@ -265,6 +265,7 @@ class TestFetch:
         shaped = await plugin.fetch()
         assert "T-Centralen" in shaped["error"]
         assert shaped["departures"] == []
+        assert "set the site id in settings" in shaped["error"]
 
     async def test_fetch_unresolved_stop_returns_error(self, plugin, monkeypatch):
         monkeypatch.setattr(
@@ -273,6 +274,7 @@ class TestFetch:
         )
         shaped = await plugin.fetch()
         assert "Tappström" in shaped["error"]
+        assert "check the spelling in settings" in shaped["error"]
 
     async def test_fetch_departures_network_error_is_wrapped(self, plugin, monkeypatch):
         async def boom(*args, **kwargs):
@@ -291,8 +293,11 @@ class TestFetch:
         client.get.return_value = response
         client.__aenter__.return_value = client
         client.__aexit__.return_value = False
-        monkeypatch.setattr(httpx, "AsyncClient", MagicMock(return_value=client))
+        client_cls = MagicMock(return_value=client)
+        monkeypatch.setattr(httpx, "AsyncClient", client_cls)
         raw = await SLDeparturesServicePlugin._get_departures(3002, 60)
         assert raw == {"departures": []}
         called_url = client.get.call_args[0][0]
         assert called_url.endswith("/v1/sites/3002/departures")
+        assert client.get.call_args.kwargs["params"] == {"forecast": 60}
+        assert client_cls.call_args.kwargs["timeout"] == 30.0
