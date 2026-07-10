@@ -199,3 +199,4 @@ class TestShaping:
         shaped = plugin._shape_for_display({"error": "Couldn't reach SL — retrying"})
         assert shaped["error"] == "Couldn't reach SL — retrying"
         assert shaped["departures"] == []
+        assert shaped["clockbar"] == {"label": "Tappström", "value": "—", "status": "ok"}
