@@ -6,6 +6,7 @@ built-in `status` renderer for both the panel (list) and the clock-bar strip.
 Backed by the keyless SL Transport API (https://transport.integration.sl.se).
 """
 
+import time
 from typing import Any
 
 import httpx
@@ -193,6 +194,7 @@ class SLDeparturesServicePlugin(ServicePlugin):
                 continue
             if modes and mode not in modes:
                 continue
+            # SL direction codes are 1 or 2 only; mapping a missing/0 code to "" is safe.
             if direction != "Any" and str(dep.get("direction_code") or "") != direction:
                 continue
             kept.append(dep)
@@ -287,8 +289,6 @@ class SLDeparturesServicePlugin(ServicePlugin):
     @classmethod
     async def _fetch_sites(cls) -> list[dict[str, Any]]:
         """Fetch (and cache) the full SL Sites list. Shared across instances."""
-        import time
-
         now = time.time()
         if cls._sites_cache is not None and (now - cls._sites_cache_at) < cls._SITES_TTL_SECONDS:
             return cls._sites_cache

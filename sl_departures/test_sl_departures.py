@@ -201,6 +201,11 @@ class TestShaping:
         assert shaped["departures"] == []
         assert shaped["clockbar"] == {"label": "Tappström", "value": "—", "status": "ok"}
 
+    async def test_compact_display_empty_display(self, plugin):
+        # SL always sends a display string; document the fallback if it were ever empty.
+        entry = plugin._compact_display(_dep(line="176", display=""))
+        assert entry == "176"
+
 
 _SITES = [
     {"id": 3002, "name": "Tappström"},
@@ -307,6 +312,7 @@ class TestConnection:
     async def test_missing_stop_fails_fast(self):
         result = await SLDeparturesServicePlugin.test_connection({})
         assert result["success"] is False
+        assert "stop name" in result["message"]
 
     async def test_single_match_reports_next_departure(self, monkeypatch):
         monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
