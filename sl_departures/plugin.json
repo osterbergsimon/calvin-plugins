@@ -1,0 +1,18 @@
+{
+  "api_version": 1,
+  "id": "sl_departures",
+  "name": "SL Departures",
+  "version": "1.0.0",
+  "type": "service",
+  "description": "Live SL public-transport departures for a Stockholm stop, filterable by line, mode and direction",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": ["sl", "stockholm", "transit", "departures", "bus", "metro", "service"],
+  "files": {
+    "include": ["plugin.py", "plugin.json"],
+    "exclude": ["*.md", "tests/**", "__pycache__/**"]
+  },
+  "requirements": {"config_required": true}
+}
