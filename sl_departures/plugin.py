@@ -177,5 +177,29 @@ class SLDeparturesServicePlugin(ServicePlugin):
         direction = str(normalized.get("direction") or "Any").strip()
         return direction in ("Any", "1", "2")
 
+    def _filter_departures(self, departures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep departures matching the configured lines, modes and direction."""
+        lines, modes, direction = self.lines, self.modes, self.direction
+        kept: list[dict[str, Any]] = []
+        for dep in departures:
+            line = dep.get("line") or {}
+            designation = str(line.get("designation") or "")
+            mode = str(line.get("transport_mode") or "").upper()
+            if lines and designation not in lines:
+                continue
+            if modes and mode not in modes:
+                continue
+            if direction != "Any" and str(dep.get("direction_code") or "") != direction:
+                continue
+            kept.append(dep)
+        return kept
+
+    def _sort_and_limit(self, departures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Sort by expected time (fallback scheduled) and cap at max_departures."""
+        def when(dep: dict[str, Any]) -> str:
+            return str(dep.get("expected") or dep.get("scheduled") or "")
+
+        return sorted(departures, key=when)[: self.max_departures]
+
     async def fetch(self, start_date: str | None = None, end_date: str | None = None) -> dict[str, Any]:
         return {"departures": [], "clockbar": {"label": "", "value": "—", "status": "ok"}}

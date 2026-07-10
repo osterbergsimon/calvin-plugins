@@ -103,3 +103,53 @@ class TestConfig:
         assert await SLDeparturesServicePlugin.validate_config({"site_id": 3002}) is True
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 0}) is False
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "x", "direction": "9"}) is False
+
+
+def _dep(line="176", mode="BUS", dest="Stenhamra", dcode=1, expected="2026-07-10T23:48:00",
+         display="3 min", state="EXPECTED", deviations=None):
+    return {
+        "destination": dest,
+        "direction_code": dcode,
+        "state": state,
+        "display": display,
+        "expected": expected,
+        "scheduled": expected,
+        "line": {"designation": line, "transport_mode": mode},
+        "deviations": deviations or [],
+    }
+
+
+class TestFiltering:
+    async def test_filter_by_lines_and_modes(self, plugin):
+        deps = [
+            _dep(line="176", mode="BUS"),
+            _dep(line="177", mode="BUS"),
+            _dep(line="317", mode="BUS"),
+            _dep(line="10", mode="METRO"),
+        ]
+        kept = plugin._filter_departures(deps)  # lines={176,177}, modes={BUS,TRAIN}
+        assert sorted(d["line"]["designation"] for d in kept) == ["176", "177"]
+
+    async def test_filter_by_direction(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "direction": "2"})
+        deps = [_dep(dcode=1), _dep(dcode=2)]
+        kept = instance._filter_departures(deps)
+        assert [d["direction_code"] for d in kept] == [2]
+
+    async def test_no_filters_keeps_all(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x"})
+        deps = [_dep(line="1"), _dep(line="2", mode="METRO")]
+        assert len(instance._filter_departures(deps)) == 2
+
+    async def test_sort_and_limit(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "max_departures": 2})
+        deps = [
+            _dep(expected="2026-07-10T23:50:00"),
+            _dep(expected="2026-07-10T23:45:00"),
+            _dep(expected="2026-07-10T23:48:00"),
+        ]
+        ordered = instance._sort_and_limit(deps)
+        assert [d["expected"] for d in ordered] == ["2026-07-10T23:45:00", "2026-07-10T23:48:00"]
