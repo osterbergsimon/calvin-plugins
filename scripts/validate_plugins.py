@@ -5,10 +5,31 @@ from __future__ import annotations
 import ast
 import argparse
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Mirrors backend app.services.csp.validate_origin (this repo cannot import the backend).
+_HOST_SOURCE_RE = re.compile(
+    r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*"
+    r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?::\d{1,5})?$"
+)
+
+
+def _is_valid_host_source(value: str) -> bool:
+    raw = value.strip()
+    if not raw:
+        return False
+    host = raw
+    if "://" in raw:
+        scheme, host = raw.split("://", 1)
+        if scheme.lower() not in ("http", "https"):
+            return False
+    if "/" in host or any(c in host for c in " \t?#"):
+        return False
+    return bool(_HOST_SOURCE_RE.match(host.lower()))
 
 APP_MANAGED_CONFIG_FIELD_KEYS = frozenset(
     {
@@ -63,6 +84,7 @@ class MetadataRecord:
     ui_actions: ast.List | None = None
     display_schema: ast.Dict | None = None
     statusbar_schema: ast.Dict | None = None
+    browser_origins: ast.List | None = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -169,8 +191,16 @@ class MetadataVisitor(ast.NodeVisitor):
                     statusbar_schema=keyword(call, "statusbar_schema")
                     if isinstance(keyword(call, "statusbar_schema"), ast.Dict)
                     else None,
+                    browser_origins=keyword(call, "browser_origins")
+                    if isinstance(keyword(call, "browser_origins"), ast.List)
+                    else None,
                 )
             )
+            bo_node = keyword(call, "browser_origins")
+            if bo_node is not None and not isinstance(bo_node, ast.List):
+                self.records[-1].errors.append(
+                    "browser_origins must be a list literal of host-source strings"
+                )
         self.generic_visit(node)
 
 
@@ -218,6 +248,21 @@ def validate_display(record: MetadataRecord, schema_name: str, schema: ast.Dict 
         record.errors.append(f"{schema_name} must declare a kind")
 
 
+def validate_browser_origins(record: MetadataRecord) -> None:
+    if record.browser_origins is None:
+        return
+    for elt in record.browser_origins.elts:
+        literal = literal_string(elt)
+        if literal is None:
+            record.errors.append("browser_origins entries must be string literals")
+            continue
+        if not _is_valid_host_source(literal):
+            record.errors.append(
+                f"browser_origins entry {literal!r} is not a valid CSP host-source "
+                "(no CIDR/paths; use a host, host:port, *.wildcard, or http(s):// URL)"
+            )
+
+
 def validate_record(record: MetadataRecord) -> None:
     if not record.type_id:
         record.errors.append("metadata is missing literal type_id")
@@ -229,6 +274,7 @@ def validate_record(record: MetadataRecord) -> None:
     validate_display(record, "display_schema", record.display_schema)
     validate_display(record, "statusbar_schema", record.statusbar_schema)
     validate_actions(record)
+    validate_browser_origins(record)
 
 
 def plugin_paths() -> list[Path]:
