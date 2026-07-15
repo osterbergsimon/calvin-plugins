@@ -251,3 +251,46 @@ def test_main_returns_failure_for_invalid_plugin(tmp_path, capsys):
     captured = capsys.readouterr()
     assert result == 1
     assert "plugin.py not found" in captured.out
+
+
+_PY_WITH_BROWSER_ORIGINS = """
+from app.plugins.definitions import PluginMetadata
+from app.plugins.protocols import ServicePlugin
+
+
+class DemoServicePlugin(ServicePlugin):
+    metadata = PluginMetadata(
+        type_id="demo_plugin",
+        name="Demo Plugin",
+        instance_label="Source",
+        instance_config_schema={},
+        display_schema={"kind": "status", "item": {"label": "Demo", "value_path": "$.v"}},
+        browser_origins=[%s],
+    )
+
+    async def fetch(self, start_date=None, end_date=None):
+        return {"v": 1}
+"""
+
+
+def test_validator_accepts_valid_browser_origins(tmp_path):
+    plugin_dir = tmp_path / "demo-plugin"
+    src = _PY_WITH_BROWSER_ORIGINS % '"*.lab.example.com", "https://cast.example.com"'
+    write_valid_plugin(plugin_dir, src)
+    assert _mod.validate_plugins([plugin_dir]) == []
+
+
+def test_validator_rejects_cidr_browser_origin(tmp_path):
+    plugin_dir = tmp_path / "demo-plugin"
+    src = _PY_WITH_BROWSER_ORIGINS % '"10.0.0.0/24"'
+    write_valid_plugin(plugin_dir, src)
+    errors = _mod.validate_plugins([plugin_dir])
+    assert any("browser_origins" in error for error in errors)
+
+
+def test_validator_rejects_non_literal_browser_origin(tmp_path):
+    plugin_dir = tmp_path / "demo-plugin"
+    src = _PY_WITH_BROWSER_ORIGINS % "SOME_VAR"
+    write_valid_plugin(plugin_dir, src)
+    errors = _mod.validate_plugins([plugin_dir])
+    assert any("browser_origins" in error for error in errors)
