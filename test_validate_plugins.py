@@ -288,9 +288,19 @@ def test_validator_rejects_cidr_browser_origin(tmp_path):
     assert any("browser_origins" in error for error in errors)
 
 
-def test_validator_rejects_non_literal_browser_origin(tmp_path):
+def test_validator_rejects_non_literal_browser_origin_element(tmp_path):
+    # A list literal whose element is a name, not a string literal -> element path.
     plugin_dir = tmp_path / "demo-plugin"
     src = _PY_WITH_BROWSER_ORIGINS % "SOME_VAR"
     write_valid_plugin(plugin_dir, src)
     errors = _mod.validate_plugins([plugin_dir])
-    assert any("browser_origins" in error for error in errors)
+    assert any("must be string literals" in error for error in errors)
+
+
+def test_validator_rejects_non_list_browser_origins(tmp_path):
+    # browser_origins declared as a non-list value -> visitor's list-literal branch.
+    plugin_dir = tmp_path / "demo-plugin"
+    src = _PY_WITH_BROWSER_ORIGINS.replace("browser_origins=[%s],", 'browser_origins="notalist",')
+    write_valid_plugin(plugin_dir, src)
+    errors = _mod.validate_plugins([plugin_dir])
+    assert any("must be a list literal" in error for error in errors)
