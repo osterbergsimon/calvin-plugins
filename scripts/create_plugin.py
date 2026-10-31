@@ -184,7 +184,7 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         f'        type_id="{tid}",',
         f'        name="{name}",',
         f'        description="{description}",',
-        '        icon="mdi:puzzle-outline",',
+        '        icon="mdi:puzzle",',
         f'        default_instance_name="{name}",',
     ]
 

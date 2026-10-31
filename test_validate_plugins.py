@@ -412,6 +412,71 @@ def test_validator_rejects_plugin_description_with_url(tmp_path):
     assert any("description must not contain a URL" in e for e in errors)
 
 
+def test_supported_icons_match_host_map():
+    """Mirror of calvin develop PLUGIN_ICON_PATHS (frontend/src/utils/pluginIcon.js).
+
+    An icon the host does not import renders as the name's first letter, so the
+    validator must accept exactly the host's curated names.
+    """
+    assert _mod.SUPPORTED_PLUGIN_ICONS == frozenset(
+        {
+            "mdi:account",
+            "mdi:alert-circle",
+            "mdi:bus-clock",
+            "mdi:calendar",
+            "mdi:camera-outline",
+            "mdi:cast",
+            "mdi:chart-line",
+            "mdi:check",
+            "mdi:clock-outline",
+            "mdi:cog",
+            "mdi:email-outline",
+            "mdi:flask-outline",
+            "mdi:folder-image",
+            "mdi:gauge",
+            "mdi:image",
+            "mdi:image-auto-adjust",
+            "mdi:image-multiple",
+            "mdi:lightbulb-outline",
+            "mdi:map-marker",
+            "mdi:music",
+            "mdi:palette",
+            "mdi:play-circle",
+            "mdi:puzzle",
+            "mdi:rss",
+            "mdi:server",
+            "mdi:shuffle-variant",
+            "mdi:silverware-fork-knife",
+            "mdi:star",
+            "mdi:telescope",
+            "mdi:thermometer",
+            "mdi:video-outline",
+            "mdi:weather-partly-cloudy",
+            "mdi:web",
+            "mdi:wifi",
+        }
+    )
+
+
+def test_validator_accepts_icons_the_host_map_contains(tmp_path):
+    for icon in ("mdi:account", "mdi:puzzle", "mdi:thermometer", "mdi:video-outline"):
+        plugin_dir = tmp_path / f"demo-{icon.removeprefix('mdi:')}"
+        source = VALID_PLUGIN_PY.replace('icon="mdi:flask-outline",', f'icon="{icon}",')
+        write_valid_plugin(plugin_dir, source)
+
+        assert _mod.validate_plugins([plugin_dir]) == [], icon
+
+
+def test_validator_rejects_icons_the_host_map_lacks(tmp_path):
+    for icon in ("mdi:home", "mdi:puzzle-outline", "mdi:newspaper", "mdi:video"):
+        plugin_dir = tmp_path / f"demo-{icon.removeprefix('mdi:')}"
+        source = VALID_PLUGIN_PY.replace('icon="mdi:flask-outline",', f'icon="{icon}",')
+        write_valid_plugin(plugin_dir, source)
+
+        errors = _mod.validate_plugins([plugin_dir])
+        assert any("not in the host's curated list" in e for e in errors), icon
+
+
 def test_validator_rejects_unknown_icon(tmp_path):
     plugin_dir = tmp_path / "demo-plugin"
     source = VALID_PLUGIN_PY.replace("mdi:flask-outline", "mdi:not-in-map")

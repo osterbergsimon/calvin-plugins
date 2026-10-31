@@ -45,6 +45,13 @@ def test_scaffold_is_declarative():
             assert retired not in plugin_py, f"{plugin_type} scaffold contains {retired}"
 
 
+def test_scaffold_icon_is_in_the_host_map():
+    """The scaffold must emit an icon the host actually renders."""
+    plugin_py = generate_plugin_py("demo-x", "Demo X", "service", "Demo", False, None)
+    assert 'icon="mdi:puzzle"' in plugin_py
+    assert "mdi:puzzle" in _validator_mod.SUPPORTED_PLUGIN_ICONS
+
+
 def test_service_scaffold_has_fetch_and_display_schema():
     plugin_py = generate_plugin_py("demo-service", "Demo Service", "service", "Demo", False, None)
     assert "async def fetch(" in plugin_py

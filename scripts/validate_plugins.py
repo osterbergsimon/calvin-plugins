@@ -67,39 +67,44 @@ PLUGIN_NAME_MAX = 28
 PLUGIN_DESCRIPTION_MAX = 90
 FIELD_DESCRIPTION_MAX = 120
 ICON_RE = re.compile(r"^mdi:[a-z0-9-]+$")
-# Mirrors the host's curated map in frontend/src/utils/pluginIcon.js.
+# Mirrors the host's curated map in frontend/src/utils/pluginIcon.js
+# (PLUGIN_ICON_PATHS, calvin develop). Keep the two lists equal.
 SUPPORTED_PLUGIN_ICONS = frozenset(
     {
-        "mdi:book-open-page-variant",
+        "mdi:account",
+        "mdi:alert-circle",
         "mdi:bus-clock",
         "mdi:calendar",
         "mdi:camera-outline",
         "mdi:cast",
         "mdi:chart-line",
+        "mdi:check",
         "mdi:clock-outline",
+        "mdi:cog",
         "mdi:email-outline",
-        "mdi:filmstrip",
         "mdi:flask-outline",
         "mdi:folder-image",
         "mdi:gauge",
-        "mdi:home",
         "mdi:image",
         "mdi:image-auto-adjust",
         "mdi:image-multiple",
-        "mdi:lightbulb",
+        "mdi:lightbulb-outline",
         "mdi:map-marker",
         "mdi:music",
-        "mdi:newspaper",
-        "mdi:puzzle-outline",
+        "mdi:palette",
+        "mdi:play-circle",
+        "mdi:puzzle",
         "mdi:rss",
+        "mdi:server",
         "mdi:shuffle-variant",
         "mdi:silverware-fork-knife",
-        "mdi:speaker",
+        "mdi:star",
         "mdi:telescope",
-        "mdi:television",
-        "mdi:video",
+        "mdi:thermometer",
+        "mdi:video-outline",
         "mdi:weather-partly-cloudy",
         "mdi:web",
+        "mdi:wifi",
     }
 )
 # Proper nouns and acronyms allowed to stay capitalised inside a field label.

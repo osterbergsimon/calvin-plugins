@@ -35,7 +35,7 @@ class HelloPlugin(ServicePlugin):
         type_id="hello",
         name="Hello",
         description="Says hello.",
-        icon="mdi:puzzle-outline",
+        icon="mdi:puzzle",
         instance_label="greeting",
         instance_config_schema={
             "who": {
@@ -108,7 +108,7 @@ form while its default still applies, and `required: true` /
 
 `instance_label` is a lowercase noun phrase ("server", "album", "place"); the
 host capitalises it in "Add {label}" titles. `icon` is an `mdi:` name from the
-host's curated map (for example `mdi:puzzle-outline`), not an emoji. Test
+host's curated map (for example `mdi:puzzle`), not an emoji. Test
 plugins set `"catalog": false` in `plugins.json` so they stay installable but
 stay out of the picker.
 
