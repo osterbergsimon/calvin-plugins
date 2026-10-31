@@ -18,14 +18,16 @@ class TestFrontendServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="test_plugin_frontend",
-        name="Test Plugin with Frontend",
-        description="A test plugin with frontend components for testing frontend installation",
+        name="Test plugin with a page",
+        description="For plugin developers: checks installing a plugin with its own page.",
+        icon="mdi:flask-outline",
         supports_multiple_instances=False,
-        default_instance_name="Test Plugin with Frontend",
+        default_instance_name="Test plugin with a page",
         instance_config_schema={
             "message": {
                 "type": "string",
-                "description": "Test message to display",
+                "label": "Message",
+                "description": "Text the test shows.",
                 "default": "test plugin frontend OK",
                 "ui": {
                     "component": "input",

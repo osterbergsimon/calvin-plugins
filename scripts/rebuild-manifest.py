@@ -55,11 +55,30 @@ def validate_theme_directory(theme_dir: Path) -> dict:
     return manifest
 
 
+def _existing_catalog_flags() -> dict[str, bool]:
+    """Keep explicit catalog flags across rebuilds (test plugins stay hidden)."""
+    path = REPO_ROOT / "plugins.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {
+        entry["id"]: entry["catalog"]
+        for entry in data.get("plugins", [])
+        if isinstance(entry, dict)
+        and entry.get("id")
+        and isinstance(entry.get("catalog"), bool)
+    }
+
+
 def rebuild_manifest():
     """Rebuild the plugins.json manifest file."""
     plugins = []
     themes = []
     errors = []
+    catalog_flags = _existing_catalog_flags()
 
     # Scan repository for plugins and themes
     for item in REPO_ROOT.iterdir():
@@ -83,16 +102,17 @@ def rebuild_manifest():
         if plugin_json.exists() and plugin_py.exists():
             try:
                 manifest = validate_plugin_directory(item)
-                plugins.append(
-                    {
-                        "id": manifest["id"],
-                        "name": manifest.get("name", manifest["id"]),
-                        "path": item.name,
-                        "description": manifest.get("description", ""),
-                        "version": manifest.get("version", "1.0.0"),
-                        "type": manifest.get("type", "service"),
-                    }
-                )
+                entry = {
+                    "id": manifest["id"],
+                    "name": manifest.get("name", manifest["id"]),
+                    "path": item.name,
+                    "description": manifest.get("description", ""),
+                    "version": manifest.get("version", "1.0.0"),
+                    "type": manifest.get("type", "service"),
+                }
+                if catalog_flags.get(manifest["id"]) is False:
+                    entry["catalog"] = False
+                plugins.append(entry)
             except Exception as e:
                 errors.append(f"Plugin {item.name}: {e}")
 

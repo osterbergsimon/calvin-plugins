@@ -78,28 +78,29 @@ class SystemMonitorServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="system_monitor",
-        name="System Monitor",
-        description="Live CPU, memory, disk, temperature and network stats",
+        name="System monitor",
+        description="CPU, memory, disk and temperature of the Calvin server.",
+        icon="mdi:gauge",
         supports_multiple_instances=False,
         # Preserves the pre-1.0 fixed id (default would be "system_monitor-instance").
         fixed_instance_id="system-monitor-instance",
-        default_instance_name="System Monitor",
+        default_instance_name="System monitor",
         instance_config_schema={
             "show_temperature": {
                 "type": "boolean",
-                "description": "Show CPU/GPU temperature",
+                "label": "Show temperature",
                 "default": True,
                 "ui": {"component": "checkbox"},
             },
             "show_network": {
                 "type": "boolean",
-                "description": "Show network throughput",
+                "label": "Show network speed",
                 "default": True,
                 "ui": {"component": "checkbox"},
             },
             "temp_unit": {
                 "type": "string",
-                "description": "Temperature unit",
+                "label": "Temperature unit",
                 "default": "C",
                 "ui": {
                     "component": "select",
@@ -111,7 +112,8 @@ class SystemMonitorServicePlugin(ServicePlugin):
             },
             "show_in_statusbar": {
                 "type": "boolean",
-                "description": "Show CPU/RAM summary in the clock bar",
+                "label": "Show in the clock bar",
+                "description": "CPU and memory, in short.",
                 "default": False,
                 "ui": {"component": "checkbox"},
             },

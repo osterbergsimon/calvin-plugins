@@ -32,19 +32,19 @@ class ImapBackendPlugin(BackendPlugin):
 
     metadata = PluginMetadata(
         type_id="imap",
-        name="Email (IMAP)",
-        description=(
-            "Download images from email attachments. Works with Gmail, Outlook, "
-            "and any IMAP provider. Share photos from Android using Share → Email."
-        ),
-        default_instance_name="IMAP Email",
-        instance_label="Email Account",
+        name="Photos from email",
+        description="Saves photo attachments from an email inbox to Local photos.",
+        icon="mdi:email-outline",
+        default_instance_name="Photos from email",
+        instance_label="email account",
         # Same account on the same server -> same instance
         instance_identity=["email_address", "imap_server"],
         instance_config_schema={
             "email_address": {
                 "type": "string",
-                "description": "Email address to check for images",
+                "label": "Email address",
+                "description": "The inbox to check for photos.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -57,16 +57,13 @@ class ImapBackendPlugin(BackendPlugin):
             },
             "email_password": {
                 "type": "password",
-                "description": (
-                    "Email password or app-specific password (for Gmail, use App Password)"
-                ),
+                "label": "Password",
+                "description": "For Gmail and Outlook, use an app password.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "password",
                     "placeholder": "Enter password or App Password",
-                    "help_text": (
-                        "For Gmail, use an App Password instead of your regular password"
-                    ),
                     "validation": {
                         "required": True,
                     },
@@ -74,18 +71,22 @@ class ImapBackendPlugin(BackendPlugin):
             },
             "imap_server": {
                 "type": "string",
-                "description": (
-                    "IMAP server address (e.g., imap.gmail.com, imap-mail.outlook.com)"
-                ),
+                "label": "Mail server",
+                "description": "For example imap.gmail.com.",
+                "required": True,
                 "default": "imap.gmail.com",
                 "ui": {
                     "component": "input",
                     "placeholder": "imap.gmail.com",
+                    "validation": {
+                        "required": True,
+                    },
                 },
             },
             "imap_port": {
                 "type": "integer",
-                "description": "IMAP server port (usually 993 for SSL)",
+                "label": "Port",
+                "description": "Usually 993.",
                 "default": 993,
                 "ui": {
                     "component": "number",
@@ -96,33 +97,30 @@ class ImapBackendPlugin(BackendPlugin):
             },
             "check_interval": {
                 "type": "integer",
-                "description": (
-                    "How often to check for new emails (seconds, default: 300 = 5 minutes)"
-                ),
+                "label": "Check every",
+                "description": "In seconds; 300 is 5 minutes.",
                 "default": 300,
                 "ui": {
                     "component": "number",
                     "min": 60,
                     "max": 3600,
                     "placeholder": "300",
-                    "help_text": "How often to check for new emails (60-3600 seconds)",
                 },
             },
             "target_directory": {
                 "type": "string",
-                "description": (
-                    "Directory to save downloaded images (defaults to local images directory)"
-                ),
+                "label": "Save to folder",
+                "description": "Leave empty to use Local photos.",
+                "hidden": True,
                 "default": "",
                 "ui": {
                     "component": "input",
                     "placeholder": "./data/images (default)",
-                    "help_text": "Leave empty to use the local images directory",
                 },
             },
             "mark_as_read": {
                 "type": "boolean",
-                "description": "Mark processed emails as read (default: yes)",
+                "label": "Mark emails as read",
                 "default": True,
                 "ui": {
                     "component": "select",

@@ -1,10 +1,10 @@
 {
   "api_version": 1,
   "id": "image-processor",
-  "name": "Image Processor",
-  "version": "2.0.0",
+  "name": "Photo resizer",
+  "version": "2.0.1",
   "type": "backend",
-  "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
+  "description": "Shrinks large uploaded photos and makes thumbnails.",
   "author": "Calvin Team",
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",

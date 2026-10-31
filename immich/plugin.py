@@ -30,15 +30,18 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
     metadata = PluginMetadata(
         type_id="immich",
         name="Immich",
-        description="Photos from your self-hosted Immich photo library",
+        description="Albums from your Immich photo server.",
+        icon="mdi:image-multiple",
         default_instance_name="Immich",
-        instance_label="Gallery",
+        instance_label="Immich album",
         # Same Immich server -> same instance
         instance_identity=["url"],
         instance_config_schema={
             "url": {
                 "type": "string",
-                "description": "Base URL of your Immich instance (e.g. https://photos.example.com)",
+                "label": "Server address",
+                "description": "For example https://photos.example.com.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -48,7 +51,9 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
             },
             "api_key": {
                 "type": "password",
-                "description": "Immich API key (Profile → API Keys)",
+                "label": "API key",
+                "description": "In Immich: your profile → API keys.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "password",
@@ -58,7 +63,8 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
             },
             "album_id": {
                 "type": "string",
-                "description": "Album ID to source photos from (leave blank for random photos from the whole library)",
+                "label": "Album ID",
+                "description": "Leave empty for photos from your whole library.",
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -67,7 +73,8 @@ class ImmichImagePlugin(SelfHostedGalleryImagePlugin):
             },
             "count": {
                 "type": "integer",
-                "description": "Number of photos to fetch",
+                "label": "Photos to show",
+                "description": "How many to rotate through.",
                 "default": 30,
                 "ui": {
                     "component": "number",

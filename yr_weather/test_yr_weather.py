@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from loguru import logger
 
 try:
     from app.plugins.definitions import PluginMetadata
@@ -171,6 +172,16 @@ class TestContractShape:
         }
         assert required == {"latitude", "longitude"}
 
+    def test_location_is_optional(self):
+        """Coordinates alone are valid, so the host must not require location.
+
+        The host checks schema-required fields before validate_config, so
+        marking location required would reject coordinates-only instances.
+        """
+        field = YrWeatherServicePlugin.metadata.instance_config_schema["location"]
+        assert field.get("required") is not True
+        assert not (field.get("ui") or {}).get("validation", {}).get("required")
+
     def test_declares_geocode_action(self):
         """The host /geocode endpoint is gated on this action."""
         actions = YrWeatherServicePlugin.metadata.ui_actions
@@ -212,6 +223,28 @@ class TestConfig:
         assert await YrWeatherServicePlugin.validate_config({**good, "longitude": -181}) is False
         assert await YrWeatherServicePlugin.validate_config({"latitude": 59.9139}) is False
         assert await YrWeatherServicePlugin.validate_config({}) is False
+
+    async def test_validate_config_accepts_coordinates_only(self):
+        """An existing instance configured by coordinates must pass alone."""
+        good = {"latitude": 59.9139, "longitude": 10.7522}
+        assert await YrWeatherServicePlugin.validate_config(good) is True
+        # A blank place name must not make otherwise valid coordinates fail.
+        assert (
+            await YrWeatherServicePlugin.validate_config({**good, "location": ""})
+            is True
+        )
+
+    async def test_validate_config_failure_names_both_options(self):
+        messages = []
+        handler_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert await YrWeatherServicePlugin.validate_config({"location": ""}) is False
+        finally:
+            logger.remove(handler_id)
+        assert any(
+            "place name" in message.lower() and "latitude and longitude" in message.lower()
+            for message in messages
+        ), messages
 
     async def test_validate_config_rejects_unconfigured_coords(self):
         # calvin-8p0: enabling the plugin type runs normalize -> validate on an

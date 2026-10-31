@@ -31,15 +31,18 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
     metadata = PluginMetadata(
         type_id="lychee",
         name="Lychee",
-        description="Photos from your self-hosted Lychee photo gallery",
+        description="Albums from your Lychee photo server.",
+        icon="mdi:folder-image",
         default_instance_name="Lychee",
-        instance_label="Gallery",
+        instance_label="Lychee album",
         # Same Lychee server -> same instance
         instance_identity=["url"],
         instance_config_schema={
             "url": {
                 "type": "string",
-                "description": "Base URL of your Lychee instance (e.g. https://photos.example.com)",
+                "label": "Server address",
+                "description": "For example https://photos.example.com.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -49,7 +52,8 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
             },
             "api_key": {
                 "type": "password",
-                "description": "Lychee API token (Settings → Security → API keys)",
+                "label": "API token",
+                "description": "In Lychee: Settings → Security → API keys.",
                 "default": "",
                 "ui": {
                     "component": "password",
@@ -59,7 +63,8 @@ class LycheeImagePlugin(SelfHostedGalleryImagePlugin):
             },
             "album_id": {
                 "type": "string",
-                "description": "Album ID to show (leave blank for all accessible photos)",
+                "label": "Album ID",
+                "description": "Leave empty for all photos you can see.",
                 "default": "",
                 "ui": {
                     "component": "input",

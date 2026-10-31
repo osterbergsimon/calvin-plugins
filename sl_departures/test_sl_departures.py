@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from loguru import logger
 
 try:
     from app.plugins.definitions import PluginMetadata
@@ -55,6 +56,16 @@ class TestContractShape:
         assert md.display_schema["kind"] == "status"
         assert md.display_schema["layout"] == "list"
         assert md.statusbar_schema["kind"] == "status"
+
+    def test_stop_name_is_optional(self):
+        """A stop ID alone is valid, so the host must not require stop_name.
+
+        The host checks schema-required fields before validate_config, so
+        marking stop_name required would reject site-id-only instances.
+        """
+        field = SLDeparturesServicePlugin.metadata.instance_config_schema["stop_name"]
+        assert field.get("required") is not True
+        assert not (field.get("ui") or {}).get("validation", {}).get("required")
 
     def test_is_service_plugin(self):
         assert issubclass(SLDeparturesServicePlugin, ServicePlugin)
@@ -103,6 +114,28 @@ class TestConfig:
         assert await SLDeparturesServicePlugin.validate_config({"site_id": 3002}) is True
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 0}) is False
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "x", "direction": "9"}) is False
+
+    async def test_validate_config_accepts_site_id_only(self):
+        """An existing instance configured by stop ID must pass on its own."""
+        assert (
+            await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 3002})
+            is True
+        )
+
+    async def test_validate_config_failure_names_both_options(self):
+        messages = []
+        handler_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert (
+                await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 0})
+                is False
+            )
+        finally:
+            logger.remove(handler_id)
+        assert any(
+            "stop name" in message.lower() and "stop id" in message.lower()
+            for message in messages
+        ), messages
 
 
 def _dep(line="176", mode="BUS", dest="Stenhamra", dcode=1, expected="2026-07-10T23:48:00",

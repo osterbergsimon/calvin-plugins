@@ -3,114 +3,116 @@
   "plugins": [
     {
       "id": "chromecast",
-      "name": "Chromecast Now Playing",
+      "name": "Chromecast",
       "path": "chromecast",
-      "description": "Show what's currently casting on any Chromecast on your network \u2014 works with YouTube Music, Spotify, Netflix, Plex and more",
-      "version": "2.0.0",
+      "description": "What's playing on a Chromecast or Google speaker.",
+      "version": "2.0.1",
       "type": "service"
-    },
-    {
-      "id": "imap",
-      "name": "Email (IMAP)",
-      "path": "imap",
-      "description": "Download images from email attachments. Works with Gmail, Outlook, and any IMAP provider. Share photos from Android using Share \u2192 Email.",
-      "version": "2.0.0",
-      "type": "backend"
-    },
-    {
-      "id": "image-processor",
-      "name": "Image Processor",
-      "path": "image-processor",
-      "description": "Automatically processes images when uploaded (resize, optimize, generate thumbnails). Demonstrates event system usage.",
-      "version": "2.0.0",
-      "type": "backend"
     },
     {
       "id": "immich",
       "name": "Immich",
       "path": "immich",
-      "description": "Photos from your self-hosted Immich photo library",
-      "version": "2.0.0",
+      "description": "Albums from your Immich photo server.",
+      "version": "2.0.1",
       "type": "image"
     },
     {
       "id": "lychee",
       "name": "Lychee",
       "path": "lychee",
-      "description": "Photos from your self-hosted Lychee photo gallery",
-      "version": "2.0.0",
+      "description": "Albums from your Lychee photo server.",
+      "version": "2.0.1",
       "type": "image"
     },
     {
       "id": "mealie",
-      "name": "Mealie Meal Plan",
+      "name": "Mealie",
       "path": "mealie",
-      "description": "Display weekly meal plan from Mealie recipe manager",
-      "version": "2.0.0",
+      "description": "This week's meal plan from your Mealie server.",
+      "version": "2.0.1",
       "type": "service"
     },
     {
       "id": "nasa_apod",
-      "name": "NASA APOD",
+      "name": "NASA picture of the day",
       "path": "nasa-apod",
-      "description": "Astronomy Picture of the Day from NASA \u2014 daily curated space images with titles and descriptions",
-      "version": "2.0.0",
+      "description": "NASA's astronomy picture of the day, plus past ones.",
+      "version": "2.0.1",
       "type": "image"
     },
     {
+      "id": "image-processor",
+      "name": "Photo resizer",
+      "path": "image-processor",
+      "description": "Shrinks large uploaded photos and makes thumbnails.",
+      "version": "2.0.1",
+      "type": "backend"
+    },
+    {
+      "id": "imap",
+      "name": "Photos from email",
+      "path": "imap",
+      "description": "Saves photo attachments from an email inbox to Local photos.",
+      "version": "2.0.1",
+      "type": "backend"
+    },
+    {
       "id": "picsum",
-      "name": "Picsum Photos",
+      "name": "Random photos",
       "path": "picsum",
-      "description": "Random high-quality images from Picsum Photos (no API key required)",
-      "version": "2.0.0",
+      "description": "Random photos from Picsum. Nothing to set up.",
+      "version": "2.0.1",
       "type": "image"
     },
     {
       "id": "sl_departures",
-      "name": "SL Departures",
+      "name": "SL departures",
       "path": "sl_departures",
-      "description": "Live SL public-transport departures for a Stockholm stop, filterable by line, mode and direction",
-      "version": "1.0.0",
+      "description": "Next departures from a Stockholm public transport stop.",
+      "version": "1.0.2",
       "type": "service"
     },
     {
       "id": "system_monitor",
-      "name": "System Monitor",
+      "name": "System monitor",
       "path": "system-monitor",
-      "description": "Live system metrics \u2014 CPU, memory, disk, temperature and network. Optimised for Raspberry Pi.",
-      "version": "2.0.0",
+      "description": "CPU, memory, disk and temperature of the Calvin server.",
+      "version": "2.0.1",
       "type": "service"
     },
     {
       "id": "test_plugin",
-      "name": "Test Plugin",
+      "name": "Test plugin",
       "path": "test-plugin",
-      "description": "A basic test plugin for plugin installation testing",
-      "version": "2.0.0",
-      "type": "service"
+      "description": "For plugin developers: checks that installing works.",
+      "version": "2.0.1",
+      "type": "service",
+      "catalog": false
     },
     {
       "id": "test_plugin_frontend",
-      "name": "Test Plugin with Frontend",
+      "name": "Test plugin with a page",
       "path": "test-plugin-frontend",
-      "description": "A test plugin with frontend components for testing frontend installation",
-      "version": "2.0.0",
-      "type": "service"
+      "description": "For plugin developers: checks installing a plugin with its own page.",
+      "version": "2.0.1",
+      "type": "service",
+      "catalog": false
     },
     {
       "id": "unsplash",
       "name": "Unsplash",
       "path": "unsplash",
-      "description": "Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
-      "version": "2.0.0",
+      "description": "Popular photos from Unsplash. Needs a free Unsplash API key.",
+      "version": "2.0.1",
       "type": "image"
     },
     {
       "id": "yr_weather",
-      "name": "Yr.no Weather",
+      "name": "Weather (Yr)",
       "path": "yr_weather",
-      "description": "Display current weather conditions and forecast from Yr.no (Norwegian Meteorological Institute)",
-      "version": "2.0.0",
+      "description": "Weather and forecast from the Norwegian Meteorological Institute.",
+      "version": "2.0.2",
       "type": "service"
     }
   ],
@@ -120,7 +122,7 @@
       "name": "Midnight",
       "path": "midnight-theme",
       "description": "A deep midnight theme with purple and blue accents",
-      "version": "1.1.0"
+      "version": "2.0.0"
     }
   ]
 }

@@ -21,53 +21,63 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
     BASE_URL = "https://transport.integration.sl.se"
 
+    # validate_config returns a bool, so this is the message the backend log
+    # carries when neither of the two accepted configs is given.
+    _MISSING_STOP_MESSAGE = "Set either a stop name or a stop ID."
+
     _sites_cache: list[dict[str, Any]] | None = None
     _sites_cache_at: float = 0.0
     _SITES_TTL_SECONDS = 6 * 3600
 
     metadata = PluginMetadata(
         type_id="sl_departures",
-        name="SL Departures",
-        description="Live SL departures for a Stockholm stop, filterable by line, mode and direction",
-        default_instance_name="SL Departures",
-        instance_label="Stop",
+        name="SL departures",
+        description="Next departures from a Stockholm public transport stop.",
+        icon="mdi:bus-clock",
+        default_instance_name="SL departures",
+        instance_label="stop",
         supports_multiple_instances=True,
         instance_config_schema={
             "stop_name": {
                 "type": "string",
-                "description": "Stop name (resolved to a site id on Test Connection)",
+                "label": "Stop",
+                "description": "Type the stop's name, then choose Test connection, or set a Stop ID.",
+                # Not required: a stop ID alone is enough for validate_config,
+                # and the host's required check runs before it.
                 "default": "",
                 "ui": {
                     "component": "input",
                     "placeholder": "Tappström",
-                    "validation": {"required": True},
                 },
             },
             "site_id": {
                 "type": "integer",
-                "description": "SL site id (auto-filled after Test; wins over stop name if set)",
+                "label": "Stop ID",
+                "description": "Filled in by Test connection.",
                 "default": 0,
                 "ui": {
                     "component": "number",
                     "placeholder": "auto-filled after Test",
-                    "help_text": "Leave blank unless the stop name is ambiguous",
                 },
             },
             "lines": {
                 "type": "string",
-                "description": "Only show these lines (comma-separated). Empty = all lines.",
+                "label": "Lines",
+                "description": "Only these lines, separated by commas. Empty shows all.",
                 "default": "",
                 "ui": {"component": "input", "placeholder": "176, 177"},
             },
             "modes": {
                 "type": "string",
-                "description": "Only show these modes (comma-separated): bus, metro, train, tram, ship. Empty = all.",
+                "label": "Transport types",
+                "description": "Only these: bus, metro, train, tram, ship. Empty shows all.",
                 "default": "",
                 "ui": {"component": "input", "placeholder": "bus, train"},
             },
             "direction": {
                 "type": "string",
-                "description": "Filter by SL direction code",
+                "label": "Direction",
+                "description": "Usually Any; SL's direction numbers differ per line.",
                 "default": "Any",
                 "ui": {
                     "component": "select",
@@ -76,26 +86,27 @@ class SLDeparturesServicePlugin(ServicePlugin):
                         {"value": "1", "label": "Direction 1"},
                         {"value": "2", "label": "Direction 2"},
                     ],
-                    "help_text": "SL's direction codes are arbitrary per line; usually leave Any and filter by line",
                 },
             },
             "max_departures": {
                 "type": "integer",
-                "description": "Maximum rows on the panel",
+                "label": "Departures to show",
                 "default": 8,
                 "ui": {"component": "number", "placeholder": "8", "validation": {"min": 1, "max": 30}},
             },
             "forecast_minutes": {
                 "type": "integer",
-                "description": "How far ahead to look (minutes)",
+                "label": "Look ahead",
+                "description": "Minutes ahead to include.",
                 "default": 60,
                 "ui": {"component": "number", "placeholder": "60", "validation": {"min": 5, "max": 180}},
             },
             "clockbar_show_following": {
                 "type": "boolean",
-                "description": "Clock bar shows the departure after next as well",
+                "label": "Show the next departure too",
+                "description": "In the clock bar.",
                 "default": True,
-                "ui": {"component": "checkbox", "help_text": "Off = clock bar shows only the next departure"},
+                "ui": {"component": "checkbox"},
             },
         },
         ui_actions=[
@@ -170,7 +181,11 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
     @classmethod
     async def validate_config(cls, config: dict[str, Any]) -> bool:
-        """Require a stop name or a site id; direction must be Any/1/2."""
+        """Require a stop name or a site id; direction must be Any/1/2.
+
+        Either a stop name or a stop ID is enough, so the schema marks neither
+        field as required (the host checks required fields before this hook).
+        """
         normalized = cls.normalize_config(config)
         stop_name = str(normalized.get("stop_name") or "").strip()
         try:
@@ -178,6 +193,7 @@ class SLDeparturesServicePlugin(ServicePlugin):
         except (TypeError, ValueError):
             has_site = False
         if not stop_name and not has_site:
+            logger.warning(cls._MISSING_STOP_MESSAGE)
             return False
         direction = str(normalized.get("direction") or "Any").strip()
         return direction in ("Any", "1", "2")

@@ -19,6 +19,10 @@ from app.plugins.protocols import ServicePlugin
 
 _USER_AGENT = "Calvin-Dashboard/1.0 (https://github.com/osterbergsimon/calvin)"
 
+# validate_config returns a bool, so this is the message the backend log
+# carries when neither of the two accepted configs is given.
+_MISSING_LOCATION_MESSAGE = "Set either a place name or the latitude and longitude."
+
 # Yr.no symbol codes -> Calvin weather icon ids. The weather-forecast renderer
 # resolves these via frontend/src/utils/weatherIcons.js — only `mdi:weather-*`
 # identifiers listed there render; anything else falls back to the cloudy
@@ -131,36 +135,37 @@ class YrWeatherServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="yr_weather",
-        name="Yr.no Weather",
-        description=(
-            "Display current weather conditions and forecast from Yr.no "
-            "(Norwegian Meteorological Institute)"
-        ),
-        default_instance_name="Yr.no Weather",
-        instance_label="Location",
+        name="Weather (Yr)",
+        description="Weather and forecast from the Norwegian Meteorological Institute.",
+        icon="mdi:weather-partly-cloudy",
+        default_instance_name="Weather (Yr)",
+        instance_label="place",
         # Same coordinates -> same instance
         instance_identity=["latitude", "longitude"],
         instance_config_schema={
             "location": {
                 "type": "string",
-                "description": "Location name (city, address, etc.)",
+                "label": "Place",
+                "description": "A town, city or address, or set the coordinates below instead.",
+                # Not required: latitude and longitude are the accepted
+                # alternative, and the host's required check runs before
+                # validate_config.
                 "default": "",
                 "ui": {
                     "component": "input",
                     "placeholder": "Oslo, Norway or London, UK",
-                    "help_text": "Enter a city name or address to automatically get coordinates. Or enter coordinates manually below.",  # noqa: E501
                 },
             },
             "latitude": {
                 "type": "number",
-                "description": "Latitude (decimal degrees, max 4 decimals)",
+                "label": "Latitude",
+                "description": "Filled in from Place; change only to be exact.",
                 # No default: an unconfigured coordinate must read as "unset" so
                 # merely enabling the plugin type can't auto-create a phantom
                 # instance. See validate_config. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "59.9139",
-                    "help_text": "Latitude in decimal degrees. Will be auto-filled when using location search above.",  # noqa: E501
                     "validation": {
                         "required": True,
                         "min": -90,
@@ -170,12 +175,12 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "longitude": {
                 "type": "number",
-                "description": "Longitude (decimal degrees, max 4 decimals)",
+                "label": "Longitude",
+                "description": "Filled in from Place; change only to be exact.",
                 # No default — see latitude above. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "10.7522",
-                    "help_text": "Longitude in decimal degrees. Will be auto-filled when using location search above.",  # noqa: E501
                     "validation": {
                         "required": True,
                         "min": -180,
@@ -185,12 +190,13 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "altitude": {
                 "type": "integer",
-                "description": "Altitude in meters (optional, defaults to sea level)",
+                "label": "Altitude",
+                "description": "In metres. Leave 0 if you don't know.",
+                "hidden": True,
                 "default": 0,
                 "ui": {
                     "component": "number",
                     "placeholder": "0",
-                    "help_text": "Altitude above sea level in meters (optional)",
                     "validation": {
                         "min": 0,
                     },
@@ -198,12 +204,12 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "forecast_days": {
                 "type": "integer",
-                "description": "Number of forecast days to show (1-9)",
+                "label": "Days to show",
+                "description": "1 to 9.",
                 "default": 5,
                 "ui": {
                     "component": "number",
                     "placeholder": "5",
-                    "help_text": "Number of days to show in forecast (1-9 days, Yr.no provides up to 9 days)",  # noqa: E501
                     "validation": {
                         "min": 1,
                         "max": 9,
@@ -212,20 +218,20 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "fullscreen": {
                 "type": "boolean",
-                "description": "Prefer fullscreen mode",
+                "label": "Open full screen",
+                "description": "Shows the forecast full screen when chosen.",
                 "default": False,
                 "ui": {
                     "component": "checkbox",
-                    "help_text": "Open this service in fullscreen by default",
                 },
             },
             "show_in_statusbar": {
                 "type": "boolean",
-                "description": "Show temperature in the clock bar",
+                "label": "Show in the clock bar",
+                "description": "The temperature now.",
                 "default": False,
                 "ui": {
                     "component": "checkbox",
-                    "help_text": "Display current temperature next to the clock",
                 },
             },
         },
@@ -350,6 +356,12 @@ class YrWeatherServicePlugin(ServicePlugin):
     async def validate_config(cls, config: dict[str, Any]) -> bool:
         """Require real, in-range coordinates.
 
+        The place name is optional: coordinates alone are the accepted
+        alternative (and the form fills them in from Place via geocode), so
+        the schema marks neither location nor the coordinates as the only
+        required path. Note the host checks schema-required fields before this
+        hook, so none of the three may be marked required.
+
         The schema declares no lat/lon defaults, so an unconfigured instance
         normalizes to 0.0/0.0 (``to_float(None)``). Because the host normalizes
         config *before* calling this hook, a key-presence check alone can't tell
@@ -360,13 +372,16 @@ class YrWeatherServicePlugin(ServicePlugin):
         (calvin-8p0)
         """
         if "latitude" not in config or "longitude" not in config:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         normalized = cls.normalize_config(config)
         latitude = normalized.get("latitude")
         longitude = normalized.get("longitude")
         if latitude is None or longitude is None:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         if float(latitude) == 0.0 and float(longitude) == 0.0:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         return -90 <= float(latitude) <= 90 and -180 <= float(longitude) <= 180
 

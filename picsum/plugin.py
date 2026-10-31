@@ -26,15 +26,17 @@ class PicsumImagePlugin(ImagePlugin):
 
     metadata = PluginMetadata(
         type_id="picsum",
-        name="Picsum Photos",
-        description="Random high-quality images from Picsum Photos (no API key required)",
-        default_instance_name="Picsum Photos",
+        name="Random photos",
+        description="Random photos from Picsum. Nothing to set up.",
+        icon="mdi:shuffle-variant",
+        default_instance_name="Random photos",
         supports_multiple_instances=False,
         fixed_instance_id="picsum-instance",
         instance_config_schema={
             "count": {
                 "type": "integer",
-                "description": "Number of photos to fetch (1-100)",
+                "label": "Photos to show",
+                "description": "1 to 100.",
                 "default": 30,
                 "ui": {
                     "component": "number",

@@ -19,7 +19,7 @@ Options:
     --name NAME           Human-readable name (default: title-cased id)
     --description DESC    Short description
     --single              Single-instance plugin (default: multi)
-    --label LABEL         Instance label shown in UI (e.g. Location, Device)
+    --label LABEL         Instance label shown in UI (e.g. location, device)
     --author AUTHOR       Author name
     --no-tests            Skip generating test file
 
@@ -31,8 +31,8 @@ service plugins) draws the panel from `display_schema` using a built-in
 renderer.
 
 Examples:
-    python scripts/create_plugin.py service yr-pro --name "Yr.no Pro" --label Location
-    python scripts/create_plugin.py image flickr --name Flickr --description "Photos from Flickr"
+    python scripts/create_plugin.py service yr-pro --name "Yr.no Pro" --label location
+    python scripts/create_plugin.py image flickr --name Flickr --description "Photos from Flickr."
     python scripts/create_plugin.py backend resize-worker --single
 """
 
@@ -54,9 +54,9 @@ PLUGIN_CLASS_MAP = {
 # Types that default to single-instance
 DEFAULT_SINGLE = {"image", "system"}
 DEFAULT_INSTANCE_LABELS = {
-    "service": "Service",
-    "calendar": "Calendar",
-    "backend": "Job",
+    "service": "service",
+    "calendar": "calendar",
+    "backend": "job",
 }
 
 
@@ -184,6 +184,7 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         f'        type_id="{tid}",',
         f'        name="{name}",',
         f'        description="{description}",',
+        '        icon="mdi:puzzle",',
         f'        default_instance_name="{name}",',
     ]
 
@@ -208,7 +209,8 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         "            # TODO: add your config fields",
         '            # "url": {',
         '            #     "type": "string",  # string | password | integer | number | boolean',
-        '            #     "description": "Server URL",',
+        '            #     "label": "Server address",',
+        '            #     "description": "Where the server lives.",',
         '            #     "default": "",',
         '            #     "ui": {"component": "input", "validation": {"required": True}},',
         "            # },",
@@ -371,7 +373,7 @@ def main() -> int:
     parser.add_argument("--name", help="Human-readable name")
     parser.add_argument("--description", help="Short description")
     parser.add_argument("--single", action="store_true", help="Single-instance plugin")
-    parser.add_argument("--label", help="Instance label in UI (e.g. Location, Device)")
+    parser.add_argument("--label", help="Instance label in UI (e.g. location, device)")
     parser.add_argument("--author", help="Author name")
     parser.add_argument("--no-tests", action="store_true", help="Skip test file")
     args = parser.parse_args()

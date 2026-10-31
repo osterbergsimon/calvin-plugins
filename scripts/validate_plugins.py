@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import argparse
+import colorsys
 import json
 import re
 from dataclasses import dataclass, field
@@ -60,6 +61,111 @@ VALID_ACTION_SCOPES = frozenset({"global", "instance"})
 VALID_PLUGIN_TYPES = frozenset({"calendar", "image", "service", "backend", "theme"})
 REQUIRED_PLUGIN_MANIFEST_FIELDS = ("id", "name", "version", "type")
 SUPPORTED_API_VERSION = 1
+
+# Copy rules (docs/design/2026-10-31-plugin-copy.md §5).
+PLUGIN_NAME_MAX = 28
+PLUGIN_DESCRIPTION_MAX = 90
+FIELD_DESCRIPTION_MAX = 120
+ICON_RE = re.compile(r"^mdi:[a-z0-9-]+$")
+# Mirrors the host's curated map in frontend/src/utils/pluginIcon.js
+# (PLUGIN_ICON_PATHS, calvin develop). Keep the two lists equal.
+SUPPORTED_PLUGIN_ICONS = frozenset(
+    {
+        "mdi:account",
+        "mdi:alert-circle",
+        "mdi:bus-clock",
+        "mdi:calendar",
+        "mdi:camera-outline",
+        "mdi:cast",
+        "mdi:chart-line",
+        "mdi:check",
+        "mdi:clock-outline",
+        "mdi:cog",
+        "mdi:email-outline",
+        "mdi:flask-outline",
+        "mdi:folder-image",
+        "mdi:gauge",
+        "mdi:image",
+        "mdi:image-auto-adjust",
+        "mdi:image-multiple",
+        "mdi:lightbulb-outline",
+        "mdi:map-marker",
+        "mdi:music",
+        "mdi:palette",
+        "mdi:play-circle",
+        "mdi:puzzle",
+        "mdi:rss",
+        "mdi:server",
+        "mdi:shuffle-variant",
+        "mdi:silverware-fork-knife",
+        "mdi:star",
+        "mdi:telescope",
+        "mdi:thermometer",
+        "mdi:video-outline",
+        "mdi:weather-partly-cloudy",
+        "mdi:web",
+        "mdi:wifi",
+    }
+)
+# Proper nouns and acronyms allowed to stay capitalised inside a field label.
+SENTENCE_CASE_ALLOWLIST = frozenset(
+    {
+        "API",
+        "Chromecast",
+        "Gmail",
+        "Google",
+        "ID",
+        "Immich",
+        "Lychee",
+        "Mealie",
+        "NASA",
+        "Outlook",
+        "SL",
+        "TV",
+        "Unsplash",
+        "Yr",
+    }
+)
+# Placeholder example hosts are examples, not links (the copy rule bans URLs).
+_PLACEHOLDER_URL_RE = re.compile(
+    r"https?://(?:[a-z0-9-]+\.)*(?:example\.com|local)(?::\d{1,5})?", re.IGNORECASE
+)
+
+# Theme contract 2 (docs/design/2026-10-31-themes-audit.md §4).
+THEME_API_VERSION = 2
+THEME_BASE_KEYS = (
+    "bg-0",
+    "bg-1",
+    "bg-2",
+    "ink",
+    "ink-2",
+    "ink-3",
+    "line",
+    "line-soft",
+    "focus",
+    "ok",
+    "warn",
+    "err",
+    "shadow",
+    "shadow-hover",
+)
+THEME_TONE_KEYS = ("focus", "ok", "warn", "err")
+THEME_PAIR_KEYS = tuple(
+    f"{tone}{suffix}" for tone in THEME_TONE_KEYS for suffix in ("-ink", "-text")
+)
+THEME_EVENT_KEYS = tuple(f"event-{index}" for index in range(1, 9))
+THEME_ALLOWED_KEYS = frozenset(THEME_BASE_KEYS + THEME_PAIR_KEYS + THEME_EVENT_KEYS)
+THEME_HUE_RULES = {
+    ("focus", "ok"): 25,
+    ("focus", "err"): 25,
+    ("warn", "err"): 25,
+    ("focus", "warn"): 12,
+}
+THEME_AA_RATIO = 4.5
+_THEME_HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\Z")
+_THEME_FUNC_RE = re.compile(
+    r"(?:rgb|rgba|hsl|hsla)\(\s*[0-9.%\s,/+-]+\s*\)\Z", re.IGNORECASE
+)
 # Keys from the retired pre-1.0 display contract; their presence fails validation.
 LEGACY_DISPLAY_KEYS = frozenset({"type", "api_endpoint", "render_template", "component", "data_schema"})
 # Family protocol base class -> plugin type
@@ -76,6 +182,9 @@ FAMILY_BASES = {
 class MetadataRecord:
     path: Path
     type_id: str | None = None
+    name: str | None = None
+    description: str | None = None
+    icon: str | None = None
     plugin_type: str | None = None
     supports_multiple_instances: bool | None = None
     instance_label: str | None = None
@@ -113,6 +222,32 @@ def keyword(call: ast.Call, name: str) -> ast.AST | None:
         if kw.arg == name:
             return kw.value
     return None
+
+
+def dict_value(node: ast.Dict, key: str) -> ast.AST | None:
+    for key_node, value_node in zip(node.keys, node.values):
+        if literal_string(key_node) == key:
+            return value_node
+    return None
+
+
+def is_sentence_case(label: str) -> bool:
+    """First letter upper, then lower-case words except known proper nouns."""
+    text = label.strip()
+    if not text or not text[0].isupper():
+        return False
+    for word in text.split()[1:]:
+        token = word.strip(".,;:!?()[]{}…\"'")
+        if not token:
+            continue
+        if token[0].isupper() and token not in SENTENCE_CASE_ALLOWLIST:
+            return False
+    return True
+
+
+def has_disallowed_http(text: str) -> bool:
+    """True when text contains a URL that is not a placeholder example."""
+    return "http" in _PLACEHOLDER_URL_RE.sub("", text).lower()
 
 
 def display_path(path: Path) -> str:
@@ -171,6 +306,9 @@ class MetadataVisitor(ast.NodeVisitor):
                 MetadataRecord(
                     path=self.path,
                     type_id=literal_string(keyword(call, "type_id")),
+                    name=literal_string(keyword(call, "name")),
+                    description=literal_string(keyword(call, "description")),
+                    icon=literal_string(keyword(call, "icon")),
                     plugin_type=self._family_from_bases(node),
                     supports_multiple_instances=literal_bool(
                         keyword(call, "supports_multiple_instances")
@@ -217,6 +355,42 @@ def validate_schema(record: MetadataRecord, schema_name: str, schema: ast.Dict |
             record.errors.append(f"{schema_name}.{key} is app-managed")
         if not isinstance(value_node, ast.Dict):
             record.errors.append(f"{schema_name}.{key} must be a schema object")
+            continue
+        validate_field(record, schema_name, key, value_node)
+
+
+def validate_field(
+    record: MetadataRecord, schema_name: str, key: str, field_node: ast.Dict
+) -> None:
+    where = f"{schema_name}.{key}"
+
+    label_node = dict_value(field_node, "label")
+    label = literal_string(label_node)
+    if label is None or not label.strip():
+        record.errors.append(f"{where} must declare a non-empty label")
+    elif not is_sentence_case(label):
+        record.errors.append(f"{where} label {label!r} is not in sentence case")
+
+    description_node = dict_value(field_node, "description")
+    if description_node is not None:
+        description = literal_string(description_node)
+        if description is None:
+            record.errors.append(f"{where}.description must be a string literal")
+        else:
+            text = description.strip()
+            if len(text) > FIELD_DESCRIPTION_MAX:
+                record.errors.append(
+                    f"{where}.description is longer than {FIELD_DESCRIPTION_MAX} characters"
+                )
+            if not text.endswith("."):
+                record.errors.append(f"{where}.description must end with a full stop")
+            if has_disallowed_http(text):
+                record.errors.append(f"{where}.description must not contain a URL")
+
+    for flag in ("hidden", "required"):
+        flag_node = dict_value(field_node, flag)
+        if flag_node is not None and literal_bool(flag_node) is None:
+            record.errors.append(f"{where}.{flag} must be a boolean")
 
 
 def validate_actions(record: MetadataRecord) -> None:
@@ -266,6 +440,40 @@ def validate_browser_origins(record: MetadataRecord) -> None:
 def validate_record(record: MetadataRecord) -> None:
     if not record.type_id:
         record.errors.append("metadata is missing literal type_id")
+    if not record.name:
+        record.errors.append("metadata is missing literal name")
+    elif len(record.name) > PLUGIN_NAME_MAX:
+        record.errors.append(
+            f"name {record.name!r} is longer than {PLUGIN_NAME_MAX} characters"
+        )
+    if not record.description:
+        record.errors.append("metadata is missing literal description")
+    else:
+        description = record.description.strip()
+        if len(description) > PLUGIN_DESCRIPTION_MAX:
+            record.errors.append(
+                f"description is longer than {PLUGIN_DESCRIPTION_MAX} characters"
+            )
+        if not description.endswith("."):
+            record.errors.append("description must end with a full stop")
+        if has_disallowed_http(description):
+            record.errors.append("description must not contain a URL")
+    if not record.icon:
+        record.errors.append("metadata is missing icon")
+    elif not ICON_RE.match(record.icon):
+        record.errors.append(f"icon {record.icon!r} must look like mdi:<name>")
+    elif record.icon not in SUPPORTED_PLUGIN_ICONS:
+        record.errors.append(f"icon {record.icon!r} is not in the host's curated list")
+    if record.instance_label:
+        first = record.instance_label.strip().split()[0].strip(".,;:!?()[]{}…\"'")
+        if (
+            first
+            and first[0].isupper()
+            and first not in SENTENCE_CASE_ALLOWLIST
+        ):
+            record.errors.append(
+                f"instance_label {record.instance_label!r} must be a lowercase noun phrase"
+            )
     if record.supports_multiple_instances is not False and not record.instance_label:
         record.errors.append("multi-instance metadata must declare instance_label")
 
@@ -275,6 +483,54 @@ def validate_record(record: MetadataRecord) -> None:
     validate_display(record, "statusbar_schema", record.statusbar_schema)
     validate_actions(record)
     validate_browser_origins(record)
+
+
+def load_repository_manifest() -> dict | None:
+    manifest, _ = load_json(REPO_ROOT / "plugins.json")
+    return manifest
+
+
+def published_plugin_ids(manifest: dict | None = None) -> list[str]:
+    """Plugin ids shown in the catalog: entries with ``catalog: false`` are hidden."""
+    data = manifest if manifest is not None else load_repository_manifest()
+    if not isinstance(data, dict):
+        return []
+    return [
+        entry["id"]
+        for entry in data.get("plugins", [])
+        if isinstance(entry, dict)
+        and entry.get("id")
+        and entry.get("catalog", True) is not False
+    ]
+
+
+def validate_repository_manifest() -> list[str]:
+    errors: list[str] = []
+    manifest, manifest_error = load_json(REPO_ROOT / "plugins.json")
+    if manifest_error:
+        return [f"plugins.json: {manifest_error}"]
+    assert manifest is not None
+    for index, entry in enumerate(manifest.get("plugins", [])):
+        if not isinstance(entry, dict):
+            errors.append(f"plugins.json: plugin entry {index} must be an object")
+            continue
+        if "catalog" in entry and not isinstance(entry["catalog"], bool):
+            errors.append(f"plugins.json: catalog must be a boolean for {entry.get('id', index)}")
+    for index, entry in enumerate(manifest.get("themes", [])):
+        if not isinstance(entry, dict):
+            errors.append(f"plugins.json: theme entry {index} must be an object")
+    return errors
+
+
+def theme_paths() -> list[Path]:
+    manifest = load_repository_manifest()
+    if not isinstance(manifest, dict):
+        return []
+    return [
+        REPO_ROOT / theme["path"] / "theme.json"
+        for theme in manifest.get("themes", [])
+        if isinstance(theme, dict) and theme.get("path")
+    ]
 
 
 def plugin_paths() -> list[Path]:
@@ -392,6 +648,190 @@ def validate_manifest_matches_metadata(
     return errors
 
 
+def is_theme_colour(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(_THEME_HEX_RE.match(text) or _THEME_FUNC_RE.match(text))
+
+
+def _parse_hex_colour(value: str) -> tuple[tuple[int, int, int], float]:
+    raw = value.strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(channel * 2 for channel in raw)
+    alpha = 1.0
+    if len(raw) == 8:
+        alpha = int(raw[6:8], 16) / 255
+    return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)), alpha
+
+
+def _colour_channel(value: str) -> int:
+    text = value.strip()
+    if text.endswith("%"):
+        return round(float(text[:-1]) * 255 / 100)
+    return round(float(text))
+
+
+def _parse_func_colour(value: str) -> tuple[tuple[int, int, int], float]:
+    name, _, rest = value.partition("(")
+    args = rest.rstrip(")").replace("/", " ").replace(",", " ").split()
+    if not args:
+        raise ValueError("empty colour function")
+    if name.lower().startswith("rgb"):
+        rgb = tuple(max(0, min(255, _colour_channel(part))) for part in args[:3])
+        alpha = (
+            float(args[3].rstrip("%")) / (100 if args[3].endswith("%") else 1)
+            if len(args) > 3
+            else 1.0
+        )
+        return rgb, alpha  # type: ignore[return-value]
+    hue_value = float(args[0].rstrip("deg"))
+    saturation = float(args[1].rstrip("%")) / 100
+    lightness = float(args[2].rstrip("%")) / 100
+    alpha = (
+        float(args[3].rstrip("%")) / (100 if args[3].endswith("%") else 1)
+        if len(args) > 3
+        else 1.0
+    )
+    red, green, blue = colorsys.hls_to_rgb(
+        (hue_value % 360) / 360, lightness, saturation
+    )
+    return (round(red * 255), round(green * 255), round(blue * 255)), alpha
+
+
+def parse_theme_colour(value: str) -> tuple[tuple[int, int, int], float]:
+    text = value.strip()
+    if text.startswith("#"):
+        return _parse_hex_colour(text)
+    return _parse_func_colour(text)
+
+
+def _composite_colour(
+    rgb: tuple[int, int, int], alpha: float, background: tuple[int, int, int]
+) -> tuple[int, int, int]:
+    if alpha >= 1:
+        return rgb
+    return tuple(
+        round(channel * alpha + back * (1 - alpha))
+        for channel, back in zip(rgb, background, strict=True)
+    )  # type: ignore[return-value]
+
+
+def _linear_channel(channel: int) -> float:
+    value = channel / 255
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def _luminance(rgb: tuple[int, int, int]) -> float:
+    return (
+        0.2126 * _linear_channel(rgb[0])
+        + 0.7152 * _linear_channel(rgb[1])
+        + 0.0722 * _linear_channel(rgb[2])
+    )
+
+
+def theme_contrast_ratio(
+    first: tuple[int, int, int], second: tuple[int, int, int]
+) -> float:
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def _theme_rgb(
+    value: str, background: tuple[int, int, int] = (255, 255, 255)
+) -> tuple[int, int, int]:
+    rgb, alpha = parse_theme_colour(value)
+    return _composite_colour(rgb, alpha, background)
+
+
+def theme_hue(value: str) -> float:
+    red, green, blue = (channel / 255 for channel in _theme_rgb(value))
+    return colorsys.rgb_to_hls(red, green, blue)[0] * 360
+
+
+def theme_hue_distance(first: str, second: str) -> float:
+    distance = abs(theme_hue(first) - theme_hue(second)) % 360
+    return min(distance, 360 - distance)
+
+
+def _validate_theme_mode(mode: str, raw: object) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(raw, dict):
+        return [f"{mode} must be an object"]
+
+    palette: dict[str, str] = {}
+    for key, value in raw.items():
+        if key not in THEME_ALLOWED_KEYS:
+            errors.append(f"{mode}.{key} is not a colour token")
+            continue
+        if not is_theme_colour(value):
+            errors.append(f"{mode}.{key} is not a valid colour")
+            continue
+        palette[key] = value.strip()
+
+    missing = [key for key in THEME_BASE_KEYS if key not in palette]
+    for key in missing:
+        errors.append(f"missing {key} in {mode}")
+    if missing:
+        return errors
+
+    background = _theme_rgb(palette["bg-1"])
+    for key in ("ink", "ink-2", "ink-3"):
+        if theme_contrast_ratio(_theme_rgb(palette[key]), background) < THEME_AA_RATIO:
+            errors.append(f"{key} is below AA on bg-1 in {mode}")
+
+    for tone in THEME_TONE_KEYS:
+        tone_rgb = _theme_rgb(palette[tone], background)
+        for suffix in ("-ink", "-text"):
+            pair_key = f"{tone}{suffix}"
+            if pair_key not in palette:
+                continue  # the host derives a readable pair
+            pair_rgb = _theme_rgb(palette[pair_key], background)
+            target = tone_rgb if suffix == "-ink" else background
+            if theme_contrast_ratio(pair_rgb, target) < THEME_AA_RATIO:
+                where = tone if suffix == "-ink" else "bg-1"
+                errors.append(f"{pair_key} is below AA on {where} in {mode}")
+
+    for (first, second), minimum in THEME_HUE_RULES.items():
+        distance = theme_hue_distance(palette[first], palette[second])
+        if round(distance) < minimum:
+            errors.append(
+                f"{first} and {second} are {round(distance)}° apart in {mode} "
+                f"(minimum {minimum}°)"
+            )
+    return errors
+
+
+def validate_theme(theme_json: Path) -> list[str]:
+    data, error = load_json(theme_json)
+    if error:
+        return [f"{display_path(theme_json)}: {error}"]
+    assert data is not None
+
+    errors: list[str] = []
+    for field_name in ("id", "name", "version"):
+        if not data.get(field_name):
+            errors.append(f"missing required field '{field_name}'")
+    if data.get("theme_api") != THEME_API_VERSION:
+        errors.append(
+            f"theme_api must be {THEME_API_VERSION} "
+            f"(got {data.get('theme_api')!r})"
+        )
+    for mode in ("variables", "dark_mode"):
+        errors.extend(_validate_theme_mode(mode, data.get(mode)))
+    return [f"{display_path(theme_json)}: {message}" for message in errors]
+
+
+def validate_themes() -> list[str]:
+    errors: list[str] = []
+    for path in theme_paths():
+        if not path.exists():
+            errors.append(f"{display_path(path)}: theme.json not found")
+            continue
+        errors.extend(validate_theme(path))
+    return errors
+
+
 def validate_plugins(paths: list[Path] | None = None) -> list[str]:
     errors: list[str] = []
     for path in resolved_plugin_paths(paths):
@@ -410,6 +850,9 @@ def validate_plugins(paths: list[Path] | None = None) -> list[str]:
             validate_record(record)
             for error in record.errors:
                 errors.append(f"{display_path(path)}: {error}")
+    if paths is None:
+        errors.extend(validate_repository_manifest())
+        errors.extend(validate_themes())
     return errors
 
 
@@ -437,7 +880,11 @@ def main(argv: list[str] | None = None) -> int:
             print(error)
         return 1
     count = len(resolved_plugin_paths(args.paths or None))
-    print(f"Plugin validation passed ({count} plugin{'s' if count != 1 else ''})")
+    summary = f"{count} plugin{'s' if count != 1 else ''}"
+    if not args.paths:
+        theme_count = len(theme_paths())
+        summary += f" and {theme_count} theme{'s' if theme_count != 1 else ''}"
+    print(f"Plugin validation passed ({summary})")
     return 0
 
 

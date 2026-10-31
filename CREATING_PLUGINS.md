@@ -12,7 +12,7 @@ This guide describes **plugin contract 1.0** (`api_version: 1`).
 
 ```bash
 # Scaffold a new plugin
-python scripts/create_plugin.py service my-widget --name "My Widget" --label Server
+python scripts/create_plugin.py service my-widget --name "My Widget" --label server
 
 # Validate it (no imports needed — AST-based)
 python scripts/validate_plugins.py my-widget
@@ -34,11 +34,16 @@ class HelloPlugin(ServicePlugin):
     metadata = PluginMetadata(
         type_id="hello",
         name="Hello",
-        description="Says hello",
-        instance_label="Greeting",
+        description="Says hello.",
+        icon="mdi:puzzle",
+        instance_label="greeting",
         instance_config_schema={
-            "who": {"type": "string", "default": "world",
-                    "ui": {"component": "input", "validation": {"required": True}}},
+            "who": {
+                "type": "string",
+                "label": "Who",
+                "default": "world",
+                "ui": {"component": "input", "validation": {"required": True}},
+            },
         },
         display_schema={
             "kind": "status",
@@ -92,6 +97,20 @@ card-grid display.
    `fixed_instance_id`).
 6. **Display.** `display_schema` (and optionally `statusbar_schema`) tell the
    host how to draw your data with a built-in renderer — see below.
+
+### Form copy and icons
+
+Every config field declares a sentence-case `label` (the form label) and an
+optional one-sentence `description` (the hint under the control, ending with a
+full stop and with no URLs). `hidden: true` keeps an advanced field out of the
+form while its default still applies, and `required: true` /
+`ui.validation.required` marks a field the form cannot save without.
+
+`instance_label` is a lowercase noun phrase ("server", "album", "place"); the
+host capitalises it in "Add {label}" titles. `icon` is an `mdi:` name from the
+host's curated map (for example `mdi:puzzle`), not an emoji. Test
+plugins set `"catalog": false` in `plugins.json` so they stay installable but
+stay out of the picker.
 
 ## The plugin families
 

@@ -32,12 +32,11 @@ class ChromecastServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="chromecast",
-        name="Chromecast Now Playing",
-        description=(
-            "Show what's casting on any Chromecast — YouTube Music, Spotify, Netflix and more"
-        ),
+        name="Chromecast",
+        description="What's playing on a Chromecast or Google speaker.",
+        icon="mdi:cast",
         supports_multiple_instances=True,
-        instance_label="Device",
+        instance_label="speaker",
         default_instance_name="Chromecast",
         # Same device -> same instance (empty device_name falls back to the
         # generic config-hash id).
@@ -45,16 +44,21 @@ class ChromecastServicePlugin(ServicePlugin):
         instance_config_schema={
             "device_name": {
                 "type": "string",
-                "description": "Chromecast device",
+                "label": "Speaker or TV",
+                "description": "The name it has in the Google Home app.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "select-scan",
                     "placeholder": "Click Scan to discover devices on your network",
+                    "validation": {"required": True},
                 },
             },
             "discovery_timeout": {
                 "type": "integer",
-                "description": "mDNS discovery timeout in seconds",
+                "label": "Search time",
+                "description": "Seconds to look for it on the network.",
+                "hidden": True,
                 "default": 5,
                 "ui": {
                     "component": "number",

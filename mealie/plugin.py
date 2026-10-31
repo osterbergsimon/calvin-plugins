@@ -22,16 +22,19 @@ class MealieServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="mealie",
-        name="Mealie Meal Plan",
-        description="Display weekly meal plan from Mealie recipe manager",
-        default_instance_name="Mealie Meal Plan",
-        instance_label="Server",
+        name="Mealie",
+        description="This week's meal plan from your Mealie server.",
+        icon="mdi:silverware-fork-knife",
+        default_instance_name="Mealie",
+        instance_label="Mealie server",
         # Same Mealie server -> same instance
         instance_identity=["mealie_url"],
         instance_config_schema={
             "mealie_url": {
                 "type": "string",
-                "description": "Mealie instance URL (e.g., http://mealie.local:9000)",
+                "label": "Server address",
+                "description": "For example http://mealie.local:9000.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -44,12 +47,13 @@ class MealieServicePlugin(ServicePlugin):
             },
             "api_token": {
                 "type": "password",
-                "description": "Mealie API token (create at /user/profile/api-tokens)",
+                "label": "API token",
+                "description": "In Mealie: your profile → API tokens.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "password",
                     "placeholder": "Enter your Mealie API token",
-                    "help_text": "Create an API token in Mealie at /user/profile/api-tokens",
                     "validation": {
                         "required": True,
                     },
@@ -57,7 +61,9 @@ class MealieServicePlugin(ServicePlugin):
             },
             "group_id": {
                 "type": "string",
-                "description": "Group ID (optional, defaults to user's default group)",
+                "label": "Group",
+                "description": "Leave empty for your own group.",
+                "hidden": True,
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -66,12 +72,12 @@ class MealieServicePlugin(ServicePlugin):
             },
             "days_ahead": {
                 "type": "integer",
-                "description": "Number of days ahead to show meal plan (default: 7)",
+                "label": "Days to show",
+                "description": "How many days of the meal plan, from today.",
                 "default": 7,
                 "ui": {
                     "component": "number",
                     "placeholder": "7",
-                    "help_text": "Number of days from today to display meals (e.g., 7 for a week)",
                     "validation": {
                         "min": 1,
                         "max": 30,
@@ -80,11 +86,11 @@ class MealieServicePlugin(ServicePlugin):
             },
             "fullscreen": {
                 "type": "boolean",
-                "description": "Prefer fullscreen mode",
+                "label": "Open full screen",
+                "description": "Shows the meal plan full screen when chosen.",
                 "default": False,
                 "ui": {
                     "component": "checkbox",
-                    "help_text": "Open this service in fullscreen by default",
                 },
             },
         },

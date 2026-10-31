@@ -1,10 +1,10 @@
 {
   "api_version": 1,
   "id": "system_monitor",
-  "name": "System Monitor",
-  "version": "2.0.0",
+  "name": "System monitor",
+  "version": "2.0.1",
   "type": "service",
-  "description": "Live system metrics — CPU, memory, disk, temperature and network. Optimised for Raspberry Pi.",
+  "description": "CPU, memory, disk and temperature of the Calvin server.",
   "author": "Calvin Team",
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",

@@ -1,13 +1,13 @@
 # Midnight Theme
 
-A deep midnight theme with purple and blue accents for the Calvin dashboard.
+Midnight: violet on night blue in dark mode, violet on pale lavender in light mode.
 
 ## Features
 
-- Deep dark background with subtle purple/blue tones
-- High contrast text for excellent readability
-- Purple accent colors for a modern, elegant look
-- Optimized for both light and dark mode preferences
+- Both light and dark palettes, so the theme follows Calvin's light/dark setting
+- Deep night-blue surfaces in dark mode, pale lavender in light mode
+- Violet accent with green, amber and red status colours kept far apart
+- Colours only: layout, type, spacing and radii come from Calvin
 
 ## Installation
 
@@ -16,16 +16,13 @@ Install this theme through the Calvin Settings UI:
 2. Select the "Themes" tab
 3. Click "Install from GitHub" or upload as a zip file
 
-## Theme Variables
+## Theme variables
 
-This theme customizes all standard CSS variables used throughout the Calvin interface, including:
-- Background colors (primary, secondary, tertiary)
-- Text colors (primary, secondary, tertiary)
-- Accent colors (primary, secondary, warning, error)
-- Calendar styling
-- Shadows and borders
+The theme sets the 14 base colours in both modes (`bg-0/1/2`, `ink`,
+`ink-2`, `ink-3`, `line`, `line-soft`, `focus`, `ok`, `warn`, `err`,
+`shadow`, `shadow-hover`). Calvin derives the readable `-ink`/`-text` pairs
+from those and keeps its own event colours.
 
 ## Version
 
-1.1.0
-
+2.0.0
