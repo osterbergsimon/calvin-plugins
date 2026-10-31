@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main, develop]
 
+env:
+  # Calvin ref the plugins are tested against. Pinned to calvin `develop`
+  # because Calvin integrates there (plugin icon list, plugin copy/theme
+  # specs) and calvin `main` is behind the release candidate. Revert to
+  # `main` (or the release tag) once calvin v0.1.0-rc.1 is promoted.
+  # Applies to every trigger (PRs and pushes to main/develop alike).
+  CALVIN_REF: develop
+
 jobs:
   test-plugins:
     name: Test Plugins
@@ -25,9 +33,8 @@ jobs:
         with:
           repository: osterbergsimon/calvin
           path: calvin
-          # Use the base branch for PRs, or the same branch for pushes
-          # This ensures plugins are tested against the correct calvin version
-          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          # See CALVIN_REF at the top of this file.
+          ref: ${{ env.CALVIN_REF }}
       
       - name: Install UV
         uses: astral-sh/setup-uv@v3
