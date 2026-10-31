@@ -671,9 +671,15 @@ def test_icon_list_matches_host_icon_map():
     """The validator's icon list must equal the keys of the host's PLUGIN_ICON_PATHS."""
     icon_file = _find_calvin_dir() / ICON_MAP_RELPATH
     if not icon_file.is_file():
+        if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI"):
+            pytest.fail(
+                f"CI must enforce the icon-map guard but {icon_file} does not exist; "
+                "check that the calvin checkout (CALVIN_REF in .github/workflows/ci.yml) "
+                f"contains {ICON_MAP_RELPATH}"
+            )
         pytest.skip(
             f"no calvin checkout with {ICON_MAP_RELPATH} (set CALVIN_DIR or place it at "
-            "../calvin); CI always has one, so CI enforces this"
+            "../calvin); outside CI this is skipped"
         )
     host = _host_icon_names(icon_file.read_text(encoding="utf-8"))
     assert host, "parsed no keys from PLUGIN_ICON_PATHS"
