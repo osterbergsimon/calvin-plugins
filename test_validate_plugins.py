@@ -1,7 +1,11 @@
 """Tests for plugin metadata validation (contract 1.0)."""
 
 import json
+import os
+import re
 from pathlib import Path
+
+import pytest
 
 from conftest import load_script
 
@@ -639,3 +643,44 @@ def test_theme_validator_rejects_colliding_status_hues(tmp_path):
 def test_owned_plugins_and_theme_pass_repository_rules():
     assert _mod.validate_themes() == []
     assert _mod.validate_repository_manifest() == []
+
+
+ICON_MAP_RELPATH = Path("frontend/src/utils/pluginIcon.js")
+
+
+def _find_calvin_dir():
+    env = os.environ.get("CALVIN_DIR")
+    if env:
+        return Path(env)
+    # CI layout: calvin-plugins and calvin are siblings in $GITHUB_WORKSPACE.
+    return Path(__file__).resolve().parent.parent / "calvin"
+
+
+def _host_icon_names(source):
+    match = re.search(r"PLUGIN_ICON_PATHS\s*=\s*Object\.freeze\(\{(.*?)\}\)", source, re.S)
+    assert match, "PLUGIN_ICON_PATHS = Object.freeze({...}) not found in pluginIcon.js"
+    names = set()
+    for line in match.group(1).splitlines():
+        key = re.match(r"""\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\s*:""", line)
+        if key:
+            names.add("mdi:" + (key.group(1) or key.group(2) or key.group(3)))
+    return names
+
+
+def test_icon_list_matches_host_icon_map():
+    """The validator's icon list must equal the keys of the host's PLUGIN_ICON_PATHS."""
+    icon_file = _find_calvin_dir() / ICON_MAP_RELPATH
+    if not icon_file.is_file():
+        pytest.skip(
+            f"no calvin checkout with {ICON_MAP_RELPATH} (set CALVIN_DIR or place it at "
+            "../calvin); CI always has one, so CI enforces this"
+        )
+    host = _host_icon_names(icon_file.read_text(encoding="utf-8"))
+    assert host, "parsed no keys from PLUGIN_ICON_PATHS"
+    mirror = set(_mod.SUPPORTED_PLUGIN_ICONS)
+    assert mirror == host, (
+        "SUPPORTED_PLUGIN_ICONS in scripts/validate_plugins.py has drifted from the host's "
+        f"PLUGIN_ICON_PATHS ({icon_file}). "
+        f"Missing from the validator: {sorted(host - mirror)}. "
+        f"Missing from the host: {sorted(mirror - host)}."
+    )
