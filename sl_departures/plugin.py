@@ -21,6 +21,10 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
     BASE_URL = "https://transport.integration.sl.se"
 
+    # validate_config returns a bool, so this is the message the backend log
+    # carries when neither of the two accepted configs is given.
+    _MISSING_STOP_MESSAGE = "Set either a stop name or a stop ID."
+
     _sites_cache: list[dict[str, Any]] | None = None
     _sites_cache_at: float = 0.0
     _SITES_TTL_SECONDS = 6 * 3600
@@ -37,13 +41,13 @@ class SLDeparturesServicePlugin(ServicePlugin):
             "stop_name": {
                 "type": "string",
                 "label": "Stop",
-                "description": "Type the stop's name, then choose Test connection.",
-                "required": True,
+                "description": "Type the stop's name, then choose Test connection, or set a Stop ID.",
+                # Not required: a stop ID alone is enough for validate_config,
+                # and the host's required check runs before it.
                 "default": "",
                 "ui": {
                     "component": "input",
                     "placeholder": "Tappström",
-                    "validation": {"required": True},
                 },
             },
             "site_id": {
@@ -177,7 +181,11 @@ class SLDeparturesServicePlugin(ServicePlugin):
 
     @classmethod
     async def validate_config(cls, config: dict[str, Any]) -> bool:
-        """Require a stop name or a site id; direction must be Any/1/2."""
+        """Require a stop name or a site id; direction must be Any/1/2.
+
+        Either a stop name or a stop ID is enough, so the schema marks neither
+        field as required (the host checks required fields before this hook).
+        """
         normalized = cls.normalize_config(config)
         stop_name = str(normalized.get("stop_name") or "").strip()
         try:
@@ -185,6 +193,7 @@ class SLDeparturesServicePlugin(ServicePlugin):
         except (TypeError, ValueError):
             has_site = False
         if not stop_name and not has_site:
+            logger.warning(cls._MISSING_STOP_MESSAGE)
             return False
         direction = str(normalized.get("direction") or "Any").strip()
         return direction in ("Any", "1", "2")

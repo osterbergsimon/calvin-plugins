@@ -70,7 +70,7 @@
       "name": "SL departures",
       "path": "sl_departures",
       "description": "Next departures from a Stockholm public transport stop.",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "type": "service"
     },
     {
@@ -112,7 +112,7 @@
       "name": "Weather (Yr)",
       "path": "yr_weather",
       "description": "Weather and forecast from the Norwegian Meteorological Institute.",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "type": "service"
     }
   ],

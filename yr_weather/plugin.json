@@ -2,7 +2,7 @@
   "api_version": 1,
   "id": "yr_weather",
   "name": "Weather (Yr)",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "type": "service",
   "description": "Weather and forecast from the Norwegian Meteorological Institute.",
   "author": "Calvin Team",

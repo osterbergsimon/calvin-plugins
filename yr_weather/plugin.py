@@ -19,6 +19,10 @@ from app.plugins.protocols import ServicePlugin
 
 _USER_AGENT = "Calvin-Dashboard/1.0 (https://github.com/osterbergsimon/calvin)"
 
+# validate_config returns a bool, so this is the message the backend log
+# carries when neither of the two accepted configs is given.
+_MISSING_LOCATION_MESSAGE = "Set either a place name or the latitude and longitude."
+
 # Yr.no symbol codes -> Calvin weather icon ids. The weather-forecast renderer
 # resolves these via frontend/src/utils/weatherIcons.js — only `mdi:weather-*`
 # identifiers listed there render; anything else falls back to the cloudy
@@ -142,8 +146,10 @@ class YrWeatherServicePlugin(ServicePlugin):
             "location": {
                 "type": "string",
                 "label": "Place",
-                "description": "A town, city or address.",
-                "required": True,
+                "description": "A town, city or address, or set the coordinates below instead.",
+                # Not required: latitude and longitude are the accepted
+                # alternative, and the host's required check runs before
+                # validate_config.
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -350,6 +356,12 @@ class YrWeatherServicePlugin(ServicePlugin):
     async def validate_config(cls, config: dict[str, Any]) -> bool:
         """Require real, in-range coordinates.
 
+        The place name is optional: coordinates alone are the accepted
+        alternative (and the form fills them in from Place via geocode), so
+        the schema marks neither location nor the coordinates as the only
+        required path. Note the host checks schema-required fields before this
+        hook, so none of the three may be marked required.
+
         The schema declares no lat/lon defaults, so an unconfigured instance
         normalizes to 0.0/0.0 (``to_float(None)``). Because the host normalizes
         config *before* calling this hook, a key-presence check alone can't tell
@@ -360,13 +372,16 @@ class YrWeatherServicePlugin(ServicePlugin):
         (calvin-8p0)
         """
         if "latitude" not in config or "longitude" not in config:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         normalized = cls.normalize_config(config)
         latitude = normalized.get("latitude")
         longitude = normalized.get("longitude")
         if latitude is None or longitude is None:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         if float(latitude) == 0.0 and float(longitude) == 0.0:
+            logger.warning(_MISSING_LOCATION_MESSAGE)
             return False
         return -90 <= float(latitude) <= 90 and -180 <= float(longitude) <= 180
 
