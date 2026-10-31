@@ -1,10 +1,10 @@
 {
   "api_version": 1,
   "id": "mealie",
-  "name": "Mealie Meal Plan",
-  "version": "2.0.0",
+  "name": "Mealie",
+  "version": "2.0.1",
   "type": "service",
-  "description": "Display weekly meal plan from Mealie recipe manager",
+  "description": "This week's meal plan from your Mealie server.",
   "author": "Calvin Team",
   "license": "MIT",
   "homepage": "https://github.com/calvin-dashboard/calvin-plugins",

@@ -27,26 +27,28 @@ class UnsplashImagePlugin(ImagePlugin):
     metadata = PluginMetadata(
         type_id="unsplash",
         name="Unsplash",
-        description="Popular photos from Unsplash. Requires an API key from https://unsplash.com/developers",
+        description="Popular photos from Unsplash. Needs a free Unsplash API key.",
+        icon="mdi:camera-outline",
         default_instance_name="Unsplash",
         supports_multiple_instances=False,
         fixed_instance_id="unsplash-instance",
         instance_config_schema={
             "api_key": {
                 "type": "password",
-                "description": "Unsplash API key (required). Get one at https://unsplash.com/developers",
+                "label": "API key",
+                "description": "Free from Unsplash's developer site.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "password",
                     "placeholder": "Enter your Unsplash API key",
-                    "help_text": "Get your free API key at https://unsplash.com/developers",
                     "help_link": "https://unsplash.com/developers",
                     "validation": {"required": True},
                 },
             },
             "category": {
                 "type": "string",
-                "description": "Photo category: popular, latest, or oldest",
+                "label": "Which photos",
                 "default": "popular",
                 "ui": {
                     "component": "select",
@@ -59,7 +61,8 @@ class UnsplashImagePlugin(ImagePlugin):
             },
             "count": {
                 "type": "integer",
-                "description": "Number of photos to fetch (1-100)",
+                "label": "Photos to show",
+                "description": "1 to 100.",
                 "default": 30,
                 "ui": {
                     "component": "number",

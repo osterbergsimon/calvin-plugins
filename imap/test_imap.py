@@ -95,7 +95,7 @@ class TestContractShape:
             for key, field in md.instance_config_schema.items()
             if (field.get("ui") or {}).get("validation", {}).get("required")
         }
-        assert required == {"email_address", "email_password"}
+        assert required == {"email_address", "email_password", "imap_server"}
 
     def test_is_backend_plugin(self):
         assert issubclass(ImapBackendPlugin, BackendPlugin)

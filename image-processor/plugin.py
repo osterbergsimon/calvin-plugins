@@ -33,29 +33,27 @@ class ImageProcessorPlugin(BackendPlugin):
 
     metadata = PluginMetadata(
         type_id="image-processor",
-        name="Image Processor",
-        description=(
-            "Automatically processes images when uploaded (resize, optimize, "
-            "generate thumbnails). Demonstrates event system usage."
-        ),
-        default_instance_name="Image Processor",
-        instance_label="Processor",
-        # Same processing settings -> same instance
+        name="Photo resizer",
+        description="Shrinks large uploaded photos and makes thumbnails.",
+        icon="mdi:image-auto-adjust",
+        supports_multiple_instances=False,
+        default_instance_name="Photo resizer",
         instance_identity=["max_width", "max_height", "thumbnail_size"],
         instance_config_schema={
             "processing_enabled": {
                 "type": "boolean",
-                "description": "Enable image processing",
+                "label": "Process new photos",
                 "default": True,
             },
             "resize_enabled": {
                 "type": "boolean",
-                "description": "Resize large images",
+                "label": "Shrink large photos",
                 "default": True,
             },
             "max_width": {
                 "type": "integer",
-                "description": "Maximum image width in pixels",
+                "label": "Largest width",
+                "description": "In pixels.",
                 "default": 1920,
                 "ui": {
                     "component": "input",
@@ -66,7 +64,8 @@ class ImageProcessorPlugin(BackendPlugin):
             },
             "max_height": {
                 "type": "integer",
-                "description": "Maximum image height in pixels",
+                "label": "Largest height",
+                "description": "In pixels.",
                 "default": 1080,
                 "ui": {
                     "component": "input",
@@ -77,12 +76,13 @@ class ImageProcessorPlugin(BackendPlugin):
             },
             "generate_thumbnails": {
                 "type": "boolean",
-                "description": "Generate thumbnail versions",
+                "label": "Make thumbnails",
                 "default": True,
             },
             "thumbnail_size": {
                 "type": "integer",
-                "description": "Thumbnail size in pixels",
+                "label": "Thumbnail size",
+                "description": "In pixels.",
                 "default": 300,
                 "ui": {
                     "component": "input",

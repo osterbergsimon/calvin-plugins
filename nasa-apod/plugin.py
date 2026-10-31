@@ -26,15 +26,17 @@ class NasaApodImagePlugin(ImagePlugin):
 
     metadata = PluginMetadata(
         type_id="nasa_apod",
-        name="NASA APOD",
-        description="Astronomy Picture of the Day from NASA",
-        default_instance_name="NASA APOD",
+        name="NASA picture of the day",
+        description="NASA's astronomy picture of the day, plus past ones.",
+        icon="mdi:telescope",
+        default_instance_name="NASA picture of the day",
         supports_multiple_instances=False,
         fixed_instance_id="nasa-apod-instance",
         instance_config_schema={
             "api_key": {
                 "type": "string",
-                "description": "NASA API key (leave blank to use the free DEMO_KEY)",
+                "label": "API key",
+                "description": "Optional. Without one, NASA limits how often Calvin can ask.",
                 "default": "",
                 "ui": {
                     "component": "input",
@@ -43,7 +45,8 @@ class NasaApodImagePlugin(ImagePlugin):
             },
             "count": {
                 "type": "integer",
-                "description": "Number of random APOD images to fetch (1–100)",
+                "label": "Pictures to show",
+                "description": "1 to 100.",
                 "default": 20,
                 "ui": {
                     "component": "number",

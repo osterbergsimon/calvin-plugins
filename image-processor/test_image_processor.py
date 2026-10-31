@@ -64,8 +64,8 @@ class TestContractShape:
         md = ImageProcessorPlugin.metadata
         assert isinstance(md, PluginMetadata)
         assert md.type_id == "image-processor"
-        assert md.supports_multiple_instances is True
-        assert md.instance_label == "Processor"
+        assert md.supports_multiple_instances is False
+        assert md.instance_label is None
         assert md.instance_identity == ["max_width", "max_height", "thumbnail_size"]
         assert md.display_schema is None  # backend plugin: no panel
         for key in (

@@ -131,36 +131,35 @@ class YrWeatherServicePlugin(ServicePlugin):
 
     metadata = PluginMetadata(
         type_id="yr_weather",
-        name="Yr.no Weather",
-        description=(
-            "Display current weather conditions and forecast from Yr.no "
-            "(Norwegian Meteorological Institute)"
-        ),
-        default_instance_name="Yr.no Weather",
-        instance_label="Location",
+        name="Weather (Yr)",
+        description="Weather and forecast from the Norwegian Meteorological Institute.",
+        icon="mdi:weather-partly-cloudy",
+        default_instance_name="Weather (Yr)",
+        instance_label="place",
         # Same coordinates -> same instance
         instance_identity=["latitude", "longitude"],
         instance_config_schema={
             "location": {
                 "type": "string",
-                "description": "Location name (city, address, etc.)",
+                "label": "Place",
+                "description": "A town, city or address.",
+                "required": True,
                 "default": "",
                 "ui": {
                     "component": "input",
                     "placeholder": "Oslo, Norway or London, UK",
-                    "help_text": "Enter a city name or address to automatically get coordinates. Or enter coordinates manually below.",  # noqa: E501
                 },
             },
             "latitude": {
                 "type": "number",
-                "description": "Latitude (decimal degrees, max 4 decimals)",
+                "label": "Latitude",
+                "description": "Filled in from Place; change only to be exact.",
                 # No default: an unconfigured coordinate must read as "unset" so
                 # merely enabling the plugin type can't auto-create a phantom
                 # instance. See validate_config. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "59.9139",
-                    "help_text": "Latitude in decimal degrees. Will be auto-filled when using location search above.",  # noqa: E501
                     "validation": {
                         "required": True,
                         "min": -90,
@@ -170,12 +169,12 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "longitude": {
                 "type": "number",
-                "description": "Longitude (decimal degrees, max 4 decimals)",
+                "label": "Longitude",
+                "description": "Filled in from Place; change only to be exact.",
                 # No default — see latitude above. (calvin-8p0)
                 "ui": {
                     "component": "number",
                     "placeholder": "10.7522",
-                    "help_text": "Longitude in decimal degrees. Will be auto-filled when using location search above.",  # noqa: E501
                     "validation": {
                         "required": True,
                         "min": -180,
@@ -185,12 +184,13 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "altitude": {
                 "type": "integer",
-                "description": "Altitude in meters (optional, defaults to sea level)",
+                "label": "Altitude",
+                "description": "In metres. Leave 0 if you don't know.",
+                "hidden": True,
                 "default": 0,
                 "ui": {
                     "component": "number",
                     "placeholder": "0",
-                    "help_text": "Altitude above sea level in meters (optional)",
                     "validation": {
                         "min": 0,
                     },
@@ -198,12 +198,12 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "forecast_days": {
                 "type": "integer",
-                "description": "Number of forecast days to show (1-9)",
+                "label": "Days to show",
+                "description": "1 to 9.",
                 "default": 5,
                 "ui": {
                     "component": "number",
                     "placeholder": "5",
-                    "help_text": "Number of days to show in forecast (1-9 days, Yr.no provides up to 9 days)",  # noqa: E501
                     "validation": {
                         "min": 1,
                         "max": 9,
@@ -212,20 +212,20 @@ class YrWeatherServicePlugin(ServicePlugin):
             },
             "fullscreen": {
                 "type": "boolean",
-                "description": "Prefer fullscreen mode",
+                "label": "Open full screen",
+                "description": "Shows the forecast full screen when chosen.",
                 "default": False,
                 "ui": {
                     "component": "checkbox",
-                    "help_text": "Open this service in fullscreen by default",
                 },
             },
             "show_in_statusbar": {
                 "type": "boolean",
-                "description": "Show temperature in the clock bar",
+                "label": "Show in the clock bar",
+                "description": "The temperature now.",
                 "default": False,
                 "ui": {
                     "component": "checkbox",
-                    "help_text": "Display current temperature next to the clock",
                 },
             },
         },
