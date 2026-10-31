@@ -75,7 +75,7 @@ def test_multi_instance_scaffold_includes_default_instance_label(tmp_path, monke
     plugin_py = (plugin_dir / "plugin.py").read_text(encoding="utf-8")
 
     assert result == 0
-    assert 'instance_label="Service"' in plugin_py
+    assert 'instance_label="service"' in plugin_py
     assert _validator_mod.validate_plugins([plugin_dir]) == []
 
 

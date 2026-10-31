@@ -54,9 +54,9 @@ PLUGIN_CLASS_MAP = {
 # Types that default to single-instance
 DEFAULT_SINGLE = {"image", "system"}
 DEFAULT_INSTANCE_LABELS = {
-    "service": "Service",
-    "calendar": "Calendar",
-    "backend": "Job",
+    "service": "service",
+    "calendar": "calendar",
+    "backend": "job",
 }
 
 
@@ -184,6 +184,7 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         f'        type_id="{tid}",',
         f'        name="{name}",',
         f'        description="{description}",',
+        '        icon="mdi:puzzle-outline",',
         f'        default_instance_name="{name}",',
     ]
 
@@ -208,7 +209,8 @@ def generate_plugin_py(plugin_id, name, plugin_type, description, single_instanc
         "            # TODO: add your config fields",
         '            # "url": {',
         '            #     "type": "string",  # string | password | integer | number | boolean',
-        '            #     "description": "Server URL",',
+        '            #     "label": "Server address",',
+        '            #     "description": "Where the server lives.",',
         '            #     "default": "",',
         '            #     "ui": {"component": "input", "validation": {"required": True}},',
         "            # },",
