@@ -68,7 +68,8 @@ PLUGIN_DESCRIPTION_MAX = 90
 FIELD_DESCRIPTION_MAX = 120
 ICON_RE = re.compile(r"^mdi:[a-z0-9-]+$")
 # Mirrors the host's curated map in frontend/src/utils/pluginIcon.js
-# (PLUGIN_ICON_PATHS, calvin develop). Keep the two lists equal.
+# (PLUGIN_ICON_PATHS, calvin develop). Keep the two lists equal;
+# test_icon_list_matches_host_icon_map in test_validate_plugins.py fails CI on drift.
 SUPPORTED_PLUGIN_ICONS = frozenset(
     {
         "mdi:account",
