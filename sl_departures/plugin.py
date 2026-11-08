@@ -74,19 +74,12 @@ class SLDeparturesServicePlugin(ServicePlugin):
                 "default": "",
                 "ui": {"component": "input", "placeholder": "bus, train"},
             },
-            "direction": {
+            "towards": {
                 "type": "string",
-                "label": "Direction",
-                "description": "Usually Any; SL's direction numbers differ per line.",
-                "default": "Any",
-                "ui": {
-                    "component": "select",
-                    "options": [
-                        {"value": "Any", "label": "Any direction"},
-                        {"value": "1", "label": "Direction 1"},
-                        {"value": "2", "label": "Direction 2"},
-                    ],
-                },
+                "label": "Going towards",
+                "description": "End stations, separated by commas. Partial names work. Empty shows all. Test Connection lists them.",
+                "default": "",
+                "ui": {"component": "input", "placeholder": "Hässelby, Ropsten"},
             },
             "max_departures": {
                 "type": "integer",
@@ -163,6 +156,11 @@ class SLDeparturesServicePlugin(ServicePlugin):
         return {p.strip().upper() for p in str(self.config.get("modes") or "").split(",") if p.strip()}
 
     @property
+    def towards(self) -> list[str]:
+        raw = str(self.config.get("towards") or "")
+        return [p.strip().casefold() for p in raw.split(",") if p.strip()]
+
+    @property
     def direction(self) -> str:
         value = str(self.config.get("direction") or "Any").strip()
         return value if value in ("1", "2") else "Any"
@@ -199,8 +197,13 @@ class SLDeparturesServicePlugin(ServicePlugin):
         return direction in ("Any", "1", "2")
 
     def _filter_departures(self, departures: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Keep departures matching the configured lines, modes and direction."""
-        lines, modes, direction = self.lines, self.modes, self.direction
+        """Keep departures matching the configured lines, modes and end stations.
+
+        `towards` wins over the legacy `direction` code, which is no longer in
+        the schema but still honoured for configs saved before it was removed.
+        """
+        lines, modes, towards = self.lines, self.modes, self.towards
+        direction = "Any" if towards else self.direction
         kept: list[dict[str, Any]] = []
         for dep in departures:
             line = dep.get("line") or {}
@@ -210,11 +213,23 @@ class SLDeparturesServicePlugin(ServicePlugin):
                 continue
             if modes and mode not in modes:
                 continue
+            if towards and not self._matches_towards(dep, towards):
+                continue
             # SL direction codes are 1 or 2 only; mapping a missing/0 code to "" is safe.
             if direction != "Any" and str(dep.get("direction_code") or "") != direction:
                 continue
             kept.append(dep)
         return kept
+
+    @staticmethod
+    def _end_station(dep: dict[str, Any]) -> str:
+        """The line's end station; falls back to the trip destination when blank."""
+        return str(dep.get("direction") or "").strip() or str(dep.get("destination") or "").strip()
+
+    @classmethod
+    def _matches_towards(cls, dep: dict[str, Any], terms: list[str]) -> bool:
+        station = cls._end_station(dep).casefold()
+        return any(term in station for term in terms)
 
     def _sort_and_limit(self, departures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Sort by expected time (fallback scheduled) and cap at max_departures."""
@@ -366,6 +381,54 @@ class SLDeparturesServicePlugin(ServicePlugin):
         return self._shape_for_display(raw)
 
     @classmethod
+    def _end_stations(cls, departures: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
+        """Distinct end stations over departures that pass the lines/modes config."""
+        lines = {p.strip() for p in str(config.get("lines") or "").split(",") if p.strip()}
+        modes = {p.strip().upper() for p in str(config.get("modes") or "").split(",") if p.strip()}
+        seen: dict[str, None] = {}
+        for dep in departures:
+            line = dep.get("line") or {}
+            if lines and str(line.get("designation") or "") not in lines:
+                continue
+            if modes and str(line.get("transport_mode") or "").upper() not in modes:
+                continue
+            station = cls._end_station(dep)
+            if station:
+                seen.setdefault(station)
+        return sorted(seen, key=str.casefold)
+
+    @classmethod
+    def _end_station_summary(
+        cls, departures: list[dict[str, Any]], config: dict[str, Any], max_lines: int = 12
+    ) -> str:
+        """'13 → Ropsten / Norsborg · 14 → Mörby centrum', numeric lines first, capped."""
+        lines = {p.strip() for p in str(config.get("lines") or "").split(",") if p.strip()}
+        modes = {p.strip().upper() for p in str(config.get("modes") or "").split(",") if p.strip()}
+        per_line: dict[str, dict[str, None]] = {}
+        for dep in departures:
+            line = dep.get("line") or {}
+            designation = str(line.get("designation") or "").strip()
+            if not designation:
+                continue
+            if lines and designation not in lines:
+                continue
+            if modes and str(line.get("transport_mode") or "").upper() not in modes:
+                continue
+            station = cls._end_station(dep)
+            if station:
+                per_line.setdefault(designation, {}).setdefault(station)
+
+        def order(designation: str) -> tuple[int, int, str]:
+            digits = "".join(ch for ch in designation if ch.isdigit())
+            return (0, int(digits), designation) if designation.isdigit() else (1, int(digits or 0), designation)
+
+        ordered = sorted(per_line, key=order)
+        parts = [f"{d} → {' / '.join(per_line[d])}" for d in ordered[:max_lines]]
+        if len(ordered) > max_lines:
+            parts.append(f"+{len(ordered) - max_lines} more")
+        return " · ".join(parts)
+
+    @classmethod
     async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any]:
         """Resolve the stop and confirm SL is reachable, showing the next departure."""
         normalized = cls.normalize_config(config)
@@ -397,6 +460,20 @@ class SLDeparturesServicePlugin(ServicePlugin):
                 line = str((first.get("line") or {}).get("designation") or "")
                 nxt = f"{line} to {first.get('destination')} in {first.get('display')}"
                 message = f"{stop_name} (site {site_id}) — next: {nxt}"
+                summary = cls._end_station_summary(departures, normalized)
+                if summary:
+                    message += f". End stations: {summary}"
+                terms = [
+                    p.strip().casefold()
+                    for p in str(normalized.get("towards") or "").split(",")
+                    if p.strip()
+                ]
+                if terms and not any(cls._matches_towards(d, terms) for d in departures):
+                    available = cls._end_stations(departures, normalized)
+                    message += (
+                        f". Warning: nothing is going towards '{normalized.get('towards')}'. "
+                        f"Available end stations: {', '.join(available)}"
+                    )
             else:
                 message = f"{stop_name} (site {site_id}) — no departures in the next hour"
             return {"success": True, "message": message, "site_id": site_id}

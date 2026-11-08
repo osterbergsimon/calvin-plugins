@@ -115,6 +115,22 @@ class TestConfig:
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "", "site_id": 0}) is False
         assert await SLDeparturesServicePlugin.validate_config({"stop_name": "x", "direction": "9"}) is False
 
+    async def test_validate_config_accepts_legacy_directions(self):
+        for value in ("Any", "1", "2"):
+            assert await SLDeparturesServicePlugin.validate_config({"stop_name": "x", "direction": value})
+
+    async def test_schema_has_towards_and_no_direction_picker(self):
+        schema = SLDeparturesServicePlugin.metadata.instance_config_schema
+        assert "direction" not in schema
+        assert schema["towards"]["label"] == "Going towards"
+        assert schema["towards"]["default"] == ""
+        assert schema["towards"]["ui"]["component"] == "input"
+
+    async def test_legacy_direction_survives_configure(self):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "direction": "2"})
+        assert instance.direction == "2"
+
     async def test_validate_config_accepts_site_id_only(self):
         """An existing instance configured by stop ID must pass on its own."""
         assert (
@@ -139,8 +155,8 @@ class TestConfig:
 
 
 def _dep(line="176", mode="BUS", dest="Stenhamra", dcode=1, expected="2026-07-10T23:48:00",
-         display="3 min", state="EXPECTED", deviations=None):
-    return {
+         display="3 min", state="EXPECTED", deviations=None, direction=None):
+    out = {
         "destination": dest,
         "direction_code": dcode,
         "state": state,
@@ -150,6 +166,9 @@ def _dep(line="176", mode="BUS", dest="Stenhamra", dcode=1, expected="2026-07-10
         "line": {"designation": line, "transport_mode": mode},
         "deviations": deviations or [],
     }
+    if direction is not None:
+        out["direction"] = direction
+    return out
 
 
 class TestFiltering:
@@ -169,6 +188,51 @@ class TestFiltering:
         deps = [_dep(dcode=1), _dep(dcode=2)]
         kept = instance._filter_departures(deps)
         assert [d["direction_code"] for d in kept] == [2]
+
+    async def _towards(self, towards, **extra):
+        instance = SLDeparturesServicePlugin("sl-x", "SL")
+        await instance.configure({"stop_name": "x", "towards": towards, **extra})
+        return instance
+
+    async def test_towards_partial_case_insensitive(self):
+        instance = await self._towards("hässel")
+        deps = [_dep(direction="Hässelby strand"), _dep(direction="Ropsten")]
+        assert [d["direction"] for d in instance._filter_departures(deps)] == ["Hässelby strand"]
+        upper = await self._towards("HÄSSELBY")
+        assert len(upper._filter_departures(deps)) == 1
+
+    async def test_towards_several_terms(self):
+        instance = await self._towards("Hässelby, ropsten ,")
+        deps = [_dep(direction="Hässelby strand"), _dep(direction="Ropsten"), _dep(direction="Norsborg")]
+        assert [d["direction"] for d in instance._filter_departures(deps)] == ["Hässelby strand", "Ropsten"]
+
+    async def test_towards_matches_direction_not_short_trip_destination(self):
+        instance = await self._towards("Hässelby")
+        dep = _dep(line="17", dest="Vällingby", direction="Hässelby strand")
+        assert instance._filter_departures([dep]) == [dep]
+        other = await self._towards("Vällingby")
+        assert other._filter_departures([dep]) == []
+
+    async def test_towards_falls_back_to_destination_when_direction_blank(self):
+        instance = await self._towards("Stenhamra")
+        missing = _dep(dest="Stenhamra")
+        blank = _dep(dest="Stenhamra", direction="  ")
+        assert instance._filter_departures([missing, blank, _dep(dest="Ekerö")]) == [missing, blank]
+
+    async def test_empty_towards_keeps_all(self):
+        instance = await self._towards("  ")
+        deps = [_dep(direction="A"), _dep(direction="B")]
+        assert instance._filter_departures(deps) == deps
+
+    async def test_towards_overrides_legacy_direction(self):
+        instance = await self._towards("Ropsten", direction="2")
+        deps = [_dep(dcode=1, direction="Ropsten"), _dep(dcode=2, direction="Norsborg")]
+        assert [d["direction"] for d in instance._filter_departures(deps)] == ["Ropsten"]
+
+    async def test_legacy_direction_applies_when_towards_empty(self):
+        instance = await self._towards("", direction="1")
+        deps = [_dep(dcode=1, direction="Ropsten"), _dep(dcode=2, direction="Norsborg")]
+        assert [d["direction_code"] for d in instance._filter_departures(deps)] == [1]
 
     async def test_no_filters_keeps_all(self):
         instance = SLDeparturesServicePlugin("sl-x", "SL")
@@ -357,6 +421,55 @@ class TestConnection:
         assert result["success"] is True
         assert result["site_id"] == 3002
         assert "176" in result["message"] and "Stenhamra" in result["message"]
+
+    async def _connect(self, monkeypatch, deps, config):
+        monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
+        monkeypatch.setattr(
+            SLDeparturesServicePlugin, "_get_departures", AsyncMock(return_value={"departures": deps})
+        )
+        return await SLDeparturesServicePlugin.test_connection({"stop_name": "Tappström", **config})
+
+    async def test_lists_end_stations_per_line(self, monkeypatch):
+        deps = [
+            _dep(line="14", dest="Mörby centrum", direction="Mörby centrum"),
+            _dep(line="13", dest="Ropsten", direction="Ropsten"),
+            _dep(line="13", dest="Ropsten", direction="Ropsten"),
+            _dep(line="13", dest="Norsborg", direction="Norsborg"),
+            _dep(line="2", dest="Odenplan", direction="Odenplan"),
+        ]
+        result = await self._connect(monkeypatch, deps, {})
+        assert result["success"] is True
+        msg = result["message"]
+        assert "2 → Odenplan · 13 → Ropsten / Norsborg · 14 → Mörby centrum" in msg
+        assert msg.count("Ropsten") == 1
+
+    async def test_end_station_list_capped(self, monkeypatch):
+        deps = [_dep(line=str(n), direction=f"End{n}") for n in range(1, 21)]
+        result = await self._connect(monkeypatch, deps, {})
+        assert "+8 more" in result["message"]
+        assert "12 → End12" in result["message"] and "13 → End13" not in result["message"]
+
+    async def test_end_stations_respect_lines_and_modes(self, monkeypatch):
+        deps = [
+            _dep(line="13", mode="METRO", direction="Ropsten"),
+            _dep(line="176", mode="BUS", direction="Stenhamra"),
+        ]
+        by_line = await self._connect(monkeypatch, deps, {"lines": "176"})
+        assert "176 → Stenhamra" in by_line["message"] and "Ropsten" not in by_line["message"]
+        by_mode = await self._connect(monkeypatch, deps, {"modes": "metro"})
+        assert "Ropsten" in by_mode["message"] and "Stenhamra" not in by_mode["message"].split("End stations")[1]
+
+    async def test_towards_no_match_warns_but_succeeds(self, monkeypatch):
+        deps = [_dep(line="13", direction="Ropsten"), _dep(line="14", direction="Mörby centrum")]
+        result = await self._connect(monkeypatch, deps, {"towards": "Kungsträdgården"})
+        assert result["success"] is True
+        assert "Warning" in result["message"]
+        assert "Mörby centrum, Ropsten" in result["message"]
+
+    async def test_towards_match_has_no_warning(self, monkeypatch):
+        deps = [_dep(line="13", direction="Ropsten")]
+        result = await self._connect(monkeypatch, deps, {"towards": "rops"})
+        assert result["success"] is True and "Warning" not in result["message"]
 
     async def test_ambiguous_lists_candidates(self, monkeypatch):
         monkeypatch.setattr(SLDeparturesServicePlugin, "_fetch_sites", AsyncMock(return_value=_SITES))
