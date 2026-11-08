@@ -70,7 +70,7 @@
       "name": "SL departures",
       "path": "sl_departures",
       "description": "Next departures from a Stockholm public transport stop.",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "type": "service"
     },
     {
