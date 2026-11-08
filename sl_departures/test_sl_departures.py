@@ -466,6 +466,16 @@ class TestConnection:
         assert "Warning" in result["message"]
         assert "Mörby centrum, Ropsten" in result["message"]
 
+    async def test_towards_warning_ignores_departures_outside_lines(self, monkeypatch):
+        deps = [
+            _dep(line="13", mode="METRO", direction="Ropsten"),
+            _dep(line="176", mode="BUS", direction="Stenhamra"),
+        ]
+        result = await self._connect(monkeypatch, deps, {"lines": "176", "towards": "Ropsten"})
+        assert result["success"] is True
+        assert "Warning" in result["message"]
+        assert "Available end stations: Stenhamra" in result["message"]
+
     async def test_towards_match_has_no_warning(self, monkeypatch):
         deps = [_dep(line="13", direction="Ropsten")]
         result = await self._connect(monkeypatch, deps, {"towards": "rops"})

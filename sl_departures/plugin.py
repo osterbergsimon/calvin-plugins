@@ -380,42 +380,35 @@ class SLDeparturesServicePlugin(ServicePlugin):
         raw = await self._fetch_departures(site_id)
         return self._shape_for_display(raw)
 
-    @classmethod
-    def _end_stations(cls, departures: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
-        """Distinct end stations over departures that pass the lines/modes config."""
+    @staticmethod
+    def _in_scope(departures: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Departures passing the entered lines/modes (what the panel would draw from)."""
         lines = {p.strip() for p in str(config.get("lines") or "").split(",") if p.strip()}
         modes = {p.strip().upper() for p in str(config.get("modes") or "").split(",") if p.strip()}
-        seen: dict[str, None] = {}
+        kept = []
         for dep in departures:
             line = dep.get("line") or {}
             if lines and str(line.get("designation") or "") not in lines:
                 continue
             if modes and str(line.get("transport_mode") or "").upper() not in modes:
                 continue
-            station = cls._end_station(dep)
-            if station:
-                seen.setdefault(station)
-        return sorted(seen, key=str.casefold)
+            kept.append(dep)
+        return kept
 
     @classmethod
-    def _end_station_summary(
-        cls, departures: list[dict[str, Any]], config: dict[str, Any], max_lines: int = 12
-    ) -> str:
+    def _end_stations(cls, departures: list[dict[str, Any]]) -> list[str]:
+        """Distinct end stations, sorted."""
+        seen = {cls._end_station(dep) for dep in departures}
+        return sorted((s for s in seen if s), key=str.casefold)
+
+    @classmethod
+    def _end_station_summary(cls, departures: list[dict[str, Any]], max_lines: int = 12) -> str:
         """'13 → Ropsten / Norsborg · 14 → Mörby centrum', numeric lines first, capped."""
-        lines = {p.strip() for p in str(config.get("lines") or "").split(",") if p.strip()}
-        modes = {p.strip().upper() for p in str(config.get("modes") or "").split(",") if p.strip()}
         per_line: dict[str, dict[str, None]] = {}
         for dep in departures:
-            line = dep.get("line") or {}
-            designation = str(line.get("designation") or "").strip()
-            if not designation:
-                continue
-            if lines and designation not in lines:
-                continue
-            if modes and str(line.get("transport_mode") or "").upper() not in modes:
-                continue
+            designation = str((dep.get("line") or {}).get("designation") or "").strip()
             station = cls._end_station(dep)
-            if station:
+            if designation and station:
                 per_line.setdefault(designation, {}).setdefault(station)
 
         def order(designation: str) -> tuple[int, int, str]:
@@ -460,7 +453,8 @@ class SLDeparturesServicePlugin(ServicePlugin):
                 line = str((first.get("line") or {}).get("designation") or "")
                 nxt = f"{line} to {first.get('destination')} in {first.get('display')}"
                 message = f"{stop_name} (site {site_id}) — next: {nxt}"
-                summary = cls._end_station_summary(departures, normalized)
+                scoped = cls._in_scope(departures, normalized)
+                summary = cls._end_station_summary(scoped)
                 if summary:
                     message += f". End stations: {summary}"
                 terms = [
@@ -468,8 +462,8 @@ class SLDeparturesServicePlugin(ServicePlugin):
                     for p in str(normalized.get("towards") or "").split(",")
                     if p.strip()
                 ]
-                if terms and not any(cls._matches_towards(d, terms) for d in departures):
-                    available = cls._end_stations(departures, normalized)
+                if terms and not any(cls._matches_towards(d, terms) for d in scoped):
+                    available = cls._end_stations(scoped)
                     message += (
                         f". Warning: nothing is going towards '{normalized.get('towards')}'. "
                         f"Available end stations: {', '.join(available)}"
