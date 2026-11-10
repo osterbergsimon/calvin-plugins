@@ -8,18 +8,20 @@ OpenCode with DeepSeek (hosted, sandboxed), the default; standard = Claude Sonne
 only for the most qualified work, Sonnet before Opus. Tier by the paths a task touches: the highest tier wins, in
 doubt one tier up. The budget decides how many lanes run, never the tier.
 
-Swift: ordinary plugin code (plugins that hold no credentials), tests, docs, scaffold scripts and CI. Swift may write a
-failing test first. Swift never takes a task that needs private data or real credentials; a hosted model seeing this
+Swift: ordinary plugin code (plugins that hold no credentials), tests, docs, scaffold scripts and CI. Swift may write
+a failing test first. Swift never takes a task that needs private data or real credentials; a hosted model seeing this
 public code is fine. Standard whatever the paths: a diagnosis (cause unknown), a cross-cutting refactor, an open
-design question, a feature with subtle text or locale handling, a change that needs Calvin host behavior not visible in this repo. Deep: the review-C paths and the
-files that steer agents. A PR touching a path above its lane's tier fails review.
+design question, a feature with subtle text or locale handling, a change that needs Calvin host behavior not visible
+in this repo. Deep: the review-C paths and the files that steer agents. A PR touching a path above its lane's tier
+fails review.
 
-Reviews always run on Claude, whoever wrote the PR: a swift or standard lane gets a deep (Opus) reviewer, a deep lane a deep reviewer in a fresh session. This file overrides the shared model-routing.md for this project. Review tiers, by what a
-PR touches, not by who wrote it. A: the coordinator's own checks only. B: plus an independent review by a different
-model. C: plus a deep-tier review, and spec statements approved by the owner before merge. Keep C for paths where a
-mistake really hurts (secrets, auth, data loss, the check that keeps bad input out, sandbox and host settings) and
-name that harm in the row's why; ordinary code in a sensitive package is B. The "in doubt one tier up" rule is for the
-model tier, not for the review letter.
+Reviews always run on Claude, whoever wrote the PR: a swift lane gets a standard (Sonnet) reviewer, a standard lane a
+deep (Opus) reviewer, a deep lane a deep reviewer in a fresh session. This file overrides the shared model-routing.md
+for this project. Review tiers, by what a PR touches, not by who wrote it. A: the coordinator's own checks only. B:
+plus an independent review by a different model. C: plus a deep-tier review, and spec statements approved by the owner
+before merge. Keep C for paths where a mistake really hurts (secrets, auth, data loss, the check that keeps bad input
+out, sandbox and host settings) and name that harm in the row's why; ordinary code in a sensitive package is B. The
+"in doubt one tier up" rule is for the model tier, not for the review letter.
 
 ## Path map
 path glob | tier | review | why
