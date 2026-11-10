@@ -8,7 +8,7 @@ OpenCode with DeepSeek (hosted, sandboxed), the default; standard = Claude Sonne
 only for the most qualified work, Sonnet before Opus. Tier by the paths a task touches: the highest tier wins, in
 doubt one tier up. The budget decides how many lanes run, never the tier.
 
-Swift: ordinary plugin code (plugins that hold no credentials), tests, docs, scripts and CI. Swift may write a
+Swift: ordinary plugin code (plugins that hold no credentials), tests, docs, scaffold scripts and CI. Swift may write a
 failing test first. Swift never takes a task that needs private data or real credentials; a hosted model seeing this
 public code is fine. Standard whatever the paths: a diagnosis (cause unknown), a cross-cutting refactor, an open
 design question, a change that needs Calvin host behavior not visible in this repo. Deep: the review-C paths and the
@@ -34,7 +34,7 @@ path glob | tier | review | why
 `chromecast/plugin.py`, `system-monitor/plugin.py` | swift | B | act on local network and host
 `*/plugin.json`, `midnight-theme/theme.json` | swift | B | install contract with Calvin
 `plugins.json` | swift | B | generated catalog
-`scripts/rebuild-manifest.py` | swift | B | writes the catalog
+`scripts/rebuild-manifest.py` | deep | C | its output is pushed to main by the workflow without review
 `scripts/create_plugin.py`, `test_create_plugin.py` | swift | B | scaffold others copy
 `*/frontend/dist.js` | swift | B | prebuilt bundle, source in this repo, runs in browser
 `*/plugin.py` | swift | B | plugin logic
@@ -42,7 +42,7 @@ path glob | tier | review | why
 `docs/**`, `**/README.md`, `CREATING_PLUGINS.md`, `README.md` | swift | A | prose docs
 `.claude/**` | deep | C | hooks run commands in every agent session
 `.beads/hooks/**`, `AGENTS.md`, `CLAUDE.md`, `.lane-control/**` | deep | B | host git hooks and prompts that steer agents
-`.beads/**`, `.gitignore` | swift | B | tracker settings
+`.beads/**`, `.gitignore` | deep | C | ignore rules keep the credential key and Dolt DB out of a public repo
 `**` | standard | B | default
 
 ## Deep whatever the paths, here
