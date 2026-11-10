@@ -11,10 +11,10 @@ doubt one tier up. The budget decides how many lanes run, never the tier.
 Swift: ordinary plugin code (plugins that hold no credentials), tests, docs, scaffold scripts and CI. Swift may write a
 failing test first. Swift never takes a task that needs private data or real credentials; a hosted model seeing this
 public code is fine. Standard whatever the paths: a diagnosis (cause unknown), a cross-cutting refactor, an open
-design question, a change that needs Calvin host behavior not visible in this repo. Deep: the review-C paths and the
+design question, a feature with subtle text or locale handling, a change that needs Calvin host behavior not visible in this repo. Deep: the review-C paths and the
 files that steer agents. A PR touching a path above its lane's tier fails review.
 
-Reviews always run on Claude, whoever wrote the PR (a swift lane gets a standard reviewer). Review tiers, by what a
+Reviews always run on Claude, whoever wrote the PR: a swift or standard lane gets a deep (Opus) reviewer, a deep lane a deep reviewer in a fresh session. This file overrides the shared model-routing.md for this project. Review tiers, by what a
 PR touches, not by who wrote it. A: the coordinator's own checks only. B: plus an independent review by a different
 model. C: plus a deep-tier review, and spec statements approved by the owner before merge. Keep C for paths where a
 mistake really hurts (secrets, auth, data loss, the check that keeps bad input out, sandbox and host settings) and
@@ -42,7 +42,8 @@ path glob | tier | review | why
 `docs/**`, `**/README.md`, `CREATING_PLUGINS.md`, `README.md` | swift | A | prose docs
 `.claude/**` | deep | C | hooks run commands in every agent session
 `.beads/hooks/**`, `AGENTS.md`, `CLAUDE.md`, `.lane-control/**` | deep | B | host git hooks and prompts that steer agents
-`.beads/**`, `.gitignore` | deep | C | ignore rules keep the credential key and Dolt DB out of a public repo
+`.beads/.gitignore`, `.gitignore` | deep | C | ignore rules keep the credential key and Dolt DB out of a public repo
+`.beads/**` | standard | B | tracker settings
 `**` | standard | B | default
 
 ## Deep whatever the paths, here
