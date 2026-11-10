@@ -94,3 +94,9 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+<!-- lane-control:begin -->
+## lane-control
+
+This project is run with lane-control. Its adapted files are in `.lane-control/`: read them before you start work.
+<!-- lane-control:end -->
