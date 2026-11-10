@@ -7,12 +7,12 @@ on:
     branches: [main, develop]
 
 env:
-  # Calvin ref the plugins are tested against. Pinned to calvin `develop`
-  # because Calvin integrates there (plugin icon list, plugin copy/theme
-  # specs) and calvin `main` is behind the release candidate. Revert to
-  # `main` (or the release tag) once calvin v0.1.0-rc.1 is promoted.
+  # Calvin ref the plugins are tested against. CI pins the latest Calvin
+  # release tag: bump it when Calvin cuts a new release. Switch to `develop`
+  # only temporarily when plugins need unreleased host changes, and say so
+  # in the PR.
   # Applies to every trigger (PRs and pushes to main/develop alike).
-  CALVIN_REF: develop
+  CALVIN_REF: v0.1.0-rc.3
 
 jobs:
   test-plugins:
