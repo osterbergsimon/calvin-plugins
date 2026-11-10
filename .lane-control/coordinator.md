@@ -19,7 +19,7 @@ Additions to your persona for this project. They never relax a rule there.
 - Do not edit `chromecast/frontend/dist.js` or `test-plugin-frontend/frontend/dist.js` by hand without a stated reason.
 
 ## Opening lanes here
-Base branch `main`. No `orca.yaml`. No setup step in this repo; tests need a Calvin checkout with its backend venv (`uv sync --extra dev`), which is at `../calvin` (owner's answer).
+Base branch `main`. No `orca.yaml`. No setup step in this repo; tests need the Calvin checkout `calvin` beside the main calvin-plugins checkout, with its backend venv (`uv sync --extra dev`, an owner step; owner's answer). Lanes run the test command in `project.md` Checks, which finds it through git's common dir; a lane worktree has no `../calvin`.
 
 ## Owner first
 - Bumping `CALVIN_REF` (`develop` is being removed).
