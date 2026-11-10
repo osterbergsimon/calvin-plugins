@@ -31,10 +31,10 @@ command | when | where it is written
 --- | --- | ---
 `python scripts/validate_plugins.py <plugin>` | Any plugin change | CREATING_PLUGINS.md
 `python3 scripts/validate_plugins.py` | Before PR, all plugins | docs/audits/2026-10-31-rc-gates.md
-`cd ../calvin/backend && uv run pytest ../../calvin-plugins/<plugin>` | Plugin change | CREATING_PLUGINS.md, pytest.ini
+`W=$(git rev-parse --show-toplevel) C=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/../calvin; PYTHONPATH="$W:$C/backend" "$C/backend/.venv/bin/python" -m pytest "$W/<plugin>"` | Plugin change; drop `/<plugin>` for the whole repo | pytest.ini, .github/workflows/ci.yml
 `python3 scripts/rebuild-manifest.py` | Only when a manifest changed (overwrites `plugins.json`) | README.md
 
-Tests need the Calvin backend venv and a Calvin checkout, found at `../calvin` (owner's answer). CI runs the whole repo against the Calvin tag in `CALVIN_REF` (.github/workflows/ci.yml). If no Calvin checkout is available, say so; do not claim tests passed.
+Tests use the Calvin checkout `calvin` beside the main calvin-plugins checkout (owner's answer), found from any lane worktree through git's common dir, never through `../`. Its backend venv is used read-only, with the PYTHONPATH CI uses; never run `uv sync` or write there. If `$C/backend/.venv/bin/python` is missing, the tests did not run: say so, do not claim they passed. That checkout tracks Calvin main; CI runs the whole repo against the Calvin tag in `CALVIN_REF` (.github/workflows/ci.yml).
 
 ## Do not run
 - `bd dolt push`, `git push`, `git pull --rebase` from the AGENTS.md session-close steps: lanes do not push or pull on their own.

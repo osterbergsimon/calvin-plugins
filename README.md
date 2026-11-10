@@ -9,15 +9,16 @@ This repository contains plugins for the Calvin dashboard system.
 ### Essential Reading
 
 1. **[Creating Plugins Guide](./CREATING_PLUGINS.md)** - Complete guide to creating plugins ⭐ **Start here!**
-2. **[Plugin Package Format](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md)** - Official format specification
-3. **[Plugin Development Guide](../calvin/docs/PLUGIN_DEVELOPMENT.md)** - Detailed development guide
-4. **[Plugin Installation Guide](../calvin/docs/PLUGIN_INSTALLATION.md)** - How to install plugins
+2. **[Plugin Package Format](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_PACKAGE_FORMAT.md)** - Official format specification
+3. **[Plugin Development Guide](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_DEVELOPMENT_GUIDE.md)** - Detailed development guide
+4. **[Plugin Installation Guide](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_INSTALLATION.md)** - How to install plugins
+5. **[Plugin Interface Reference](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_INTERFACE.md)** - `PluginMetadata` and the `BasePlugin` surface
 
 ### Quick Links
 
-- **Format Version**: Currently `1.0.0` (see [format versioning](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#format-versioning))
+- **Contract Version**: `api_version: 1` (see [versioning](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_PACKAGE_FORMAT.md#versioning-api_version))
 - **Example Plugins**: See `test-plugin/` in this repository
-- **Built-in Examples**: See `calvin/backend/app/plugins/`
+- **Reference Plugin**: See `mealie/` in this repository
 
 ## Quick Reference
 
@@ -54,8 +55,7 @@ Minimal required fields:
 
 ```json
 {
-  "format_version": "1.0.0",
-  "protocol_version": 1,
+  "api_version": 1,
   "id": "my_plugin",
   "name": "My Plugin",
   "version": "1.0.0",
@@ -63,9 +63,9 @@ Minimal required fields:
 }
 ```
 
-**Note**: While `format_version` and `protocol_version` are optional (`1.0.0` and `1` respectively), it's recommended to include them explicitly for future compatibility.
+**Note**: `api_version` is required and must be `1`. The retired `format_version` and `protocol_version` keys are rejected by `scripts/validate_plugins.py`.
 
-See the [complete manifest schema](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#plugin-manifest-schema-pluginjson) for all available fields including:
+See the [complete manifest schema](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_PACKAGE_FORMAT.md#plugin-manifest-schema-pluginjson) for all available fields including:
 - Dependencies (Python packages, system requirements)
 - File inclusion/exclusion rules
 - Installation requirements
@@ -134,13 +134,13 @@ Quick checklist:
 7. ✅ Run `python3 scripts/rebuild-manifest.py` to update `plugins.json` (or let CI do it)
 8. ✅ Submit a pull request
 
-## Plugin Format Version
+## Plugin Contract Version
 
-**Current Format Version: `1.0.0`**
+**Current contract: `api_version: 1`**
 
-All plugins should specify `format_version: "1.0.0"` and `protocol_version: 1` in their `plugin.json` manifest. This makes both package-format and runtime-protocol compatibility explicit.
+Every `plugin.json` must declare `"api_version": 1`. It is the one contract version signal: Calvin rejects a manifest without it, and skips an installed plugin whose `api_version` no longer matches the host. The plugin's own `version` is only a release label.
 
-See [Format Versioning](../calvin/docs/PLUGIN_PACKAGE_FORMAT.md#format-versioning) for details.
+See [Versioning: `api_version`](https://github.com/osterbergsimon/calvin/blob/main/docs/plugins/PLUGIN_PACKAGE_FORMAT.md#versioning-api_version) for details.
 
 ## Testing
 
