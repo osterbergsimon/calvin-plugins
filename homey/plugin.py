@@ -5,7 +5,10 @@ used only by `HomeyClient`; nothing here logs config, and every message shown
 to a caller is plain words with no key, address or device detail.
 """
 
+import re
 from typing import Any
+
+import httpx
 
 from app.plugins.actions import PluginActionError
 from app.plugins.definitions import PluginMetadata
@@ -13,7 +16,6 @@ from app.plugins.protocols import ServicePlugin
 from homey_client import (
     HomeyAuthError,
     HomeyClient,
-    HomeyUnreachable,
 )
 
 MSG_UNREACHABLE = "Couldn't reach Homey."
@@ -27,8 +29,28 @@ def _clean(config: dict[str, Any]) -> tuple[str, str]:
     return host, key
 
 
+_NETLOC_RE = re.compile(
+    r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$"
+)
+
+
+def _valid_host(host: str) -> bool:
+    """An http(s) address: a host name or IP and optional port, no login, query or fragment."""
+    scheme, sep, rest = host.partition("://")
+    if scheme not in ("http", "https") or not sep:
+        return False
+    netloc, _, path = rest.partition("/")
+    if not _NETLOC_RE.match(netloc) or any(c in path for c in "?#@ \t\n"):
+        return False
+    try:
+        httpx.URL(host)
+    except Exception:  # noqa: BLE001 - never echo the parser's text
+        return False
+    return True
+
+
 def _usable(host: str, key: str) -> bool:
-    return host.startswith(("http://", "https://")) and bool(key)
+    return _valid_host(host) and bool(key)
 
 
 class HomeyServicePlugin(ServicePlugin):
@@ -130,8 +152,10 @@ class HomeyServicePlugin(ServicePlugin):
     async def initialize(self) -> None:
         """Validate config and build the hub client."""
         host, key = _clean(self.config)
-        if not host.startswith(("http://", "https://")):
-            raise ValueError("The Homey hub address must start with http:// or https://")
+        if not _valid_host(host):
+            raise ValueError(
+                "The Homey hub address must be an http:// or https:// address"
+            )
         if not key:
             raise ValueError("A Homey API key is required")
         self._client = HomeyClient(host, key)
@@ -158,17 +182,25 @@ class HomeyServicePlugin(ServicePlugin):
         """One device-list read with the typed (or stored) address and key."""
         host, key = _clean(cls.normalize_config(config))
         if not _usable(host, key):
-            return {"success": False, "message": "Hub address and API key are required."}
-        client = HomeyClient(host, key)
+            return {
+                "success": False,
+                "message": "Enter a valid hub address and API key.",
+            }
+        client = None
         try:
+            client = HomeyClient(host, key)
             devices = await client.list_devices()
         except HomeyAuthError:
             return {"success": False, "message": MSG_KEY_REFUSED}
-        except HomeyUnreachable:
+        except Exception:  # noqa: BLE001 - shown on screen: fixed words only
             return {"success": False, "message": MSG_UNREACHABLE}
         finally:
-            await client.aclose()
-        return {"success": True, "message": f"Connected to Homey ({len(devices)} devices)."}
+            if client is not None:
+                await client.aclose()
+        return {
+            "success": True,
+            "message": f"Connected to Homey ({len(devices)} devices).",
+        }
 
     @classmethod
     async def scan_options_with_config(
@@ -180,15 +212,17 @@ class HomeyServicePlugin(ServicePlugin):
         host, key = _clean(cls.normalize_config(config))
         if not _usable(host, key):
             return {"options": [], "error": "Enter the hub address and API key first."}
-        client = HomeyClient(host, key)
+        client = None
         try:
+            client = HomeyClient(host, key)
             devices = await client.list_devices()
         except HomeyAuthError:
             return {"options": [], "error": MSG_KEY_REFUSED}
-        except HomeyUnreachable:
+        except Exception:  # noqa: BLE001 - shown on screen: fixed words only
             return {"options": [], "error": MSG_UNREACHABLE}
         finally:
-            await client.aclose()
+            if client is not None:
+                await client.aclose()
         options = [
             {"value": d.id, "label": f"{d.name} ({d.zone})" if d.zone else d.name}
             for d in devices

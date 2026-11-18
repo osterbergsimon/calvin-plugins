@@ -6,6 +6,7 @@ Run with the Calvin backend venv, from this repo's root:
 The hub is always mocked: no test contacts a real Homey.
 """
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -250,6 +251,61 @@ class TestHomeyClient:
         assert info.value.__cause__ is None
 
 
+class TestClientHardening:
+    async def test_http_libraries_do_not_log_address_or_device_ids(self, caplog):
+        caplog.set_level(0)
+        logging.getLogger().setLevel(0)
+        await _client(
+            lambda r: httpx.Response(200, json={D1: _dev(D1, "Lamp A")})
+        ).list_devices()
+        await _client(lambda r: httpx.Response(200, json={})).set_onoff(D1, True)
+        text = " ".join(r.getMessage() for r in caplog.records)
+        assert "hub.example" not in text
+        assert D1 not in text
+
+    async def test_slow_hub_hits_the_total_deadline(self):
+        async def handler(request):
+            await asyncio.sleep(1)
+            return httpx.Response(200, json={})
+
+        client = HomeyClient(BASE, KEY, transport=_hub(handler), deadline=0.05)
+        with pytest.raises(HomeyUnreachable):
+            await client.list_devices()
+
+    def test_default_deadline_is_under_the_host_limit(self):
+        assert HomeyClient(BASE, KEY).deadline < 10.0
+
+    async def test_redirects_are_not_followed(self):
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(302, headers={"location": "http://other.example/"})
+
+        with pytest.raises(HomeyUnreachable):
+            await _client(handler).list_devices()
+        assert len(seen) == 1
+
+    def test_environment_proxies_are_ignored(self):
+        assert HomeyClient(BASE, KEY)._http._trust_env is False
+
+    async def test_deeply_nested_json_is_unreachable_not_a_crash(self):
+        body = "[" * 100000 + "]" * 100000
+        with pytest.raises(HomeyUnreachable):
+            await _client(lambda r: httpx.Response(200, text=body)).list_devices()
+
+    async def test_names_are_trimmed_and_duplicate_ids_dropped(self):
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                return httpx.Response(200, json={})
+            return httpx.Response(
+                200, json={"a": _dev(D1, "  Lamp A "), "b": _dev(D1, "Lamp A again")}
+            )
+
+        devices = await _client(handler).list_devices()
+        assert [(d.id, d.name) for d in devices] == [(D1, "Lamp A")]
+
+
 class TestChosenDevices:
     @pytest.mark.parametrize("raw", [None, "", " , ,", "   "])
     def test_empty_inputs_give_empty_list(self, raw):
@@ -345,7 +401,9 @@ class TestContractShape:
         assert schema["api_key"]["type"] == "password"
 
     def test_api_key_description_names_both_scopes(self):
-        text = HomeyServicePlugin.metadata.instance_config_schema["api_key"]["description"]
+        text = HomeyServicePlugin.metadata.instance_config_schema["api_key"][
+            "description"
+        ]
         assert "homey.device.readonly" in text
         assert "homey.device.control" in text
 
@@ -401,6 +459,40 @@ class TestConfig:
         assert not any(KEY in r.getMessage() for r in caplog.records)
 
 
+class TestHostValidation:
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "http://[bad",
+            "http://a b",
+            "http://user:pw@hub.example",
+            "http://hub.example/?x=1",
+            "http://hub.example/#f",
+            "https://",
+        ],
+    )
+    async def test_odd_hosts_are_rejected_without_calling_the_hub(
+        self, fake_client, host
+    ):
+        cfg = {"host": host, "api_key": KEY}
+        assert await HomeyServicePlugin.validate_config(cfg) is False
+        result = await HomeyServicePlugin.test_connection(cfg)
+        assert result["success"] is False and KEY not in result["message"]
+        scan = await HomeyServicePlugin.scan_options_with_config("devices", cfg)
+        assert scan["options"] == [] and scan["error"]
+        assert fake_client.instances == []
+
+    async def test_client_construction_failure_is_unreachable(self, monkeypatch):
+        def boom(*a, **k):
+            raise ValueError("http://hub.example leaked")
+
+        monkeypatch.setattr(plugin_mod, "HomeyClient", boom)
+        result = await HomeyServicePlugin.test_connection(GOOD)
+        assert result == {"success": False, "message": "Couldn't reach Homey."}
+        scan = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert scan == {"options": [], "error": "Couldn't reach Homey."}
+
+
 class TestConnection:
     async def test_success(self, fake_client, monkeypatch):
         result = await HomeyServicePlugin.test_connection(GOOD)
@@ -440,7 +532,9 @@ def _failing_init(exc):
 
 
 class TestScan:
-    async def test_lists_only_onoff_devices_sorted_by_label(self, fake_client, monkeypatch):
+    async def test_lists_only_onoff_devices_sorted_by_label(
+        self, fake_client, monkeypatch
+    ):
         devices = [
             _homey_device(D2, "Lamp B", "Room A"),
             _homey_device(D3, "Sensor", "Room A", has_onoff=False, on=None),
@@ -485,14 +579,22 @@ class TestScan:
 
     async def test_result_never_contains_the_key(self, fake_client, monkeypatch):
         monkeypatch.setattr(
-            FakeClient, "__init__", _listing_init([_homey_device(D1, "Lamp A")]), raising=True
+            FakeClient,
+            "__init__",
+            _listing_init([_homey_device(D1, "Lamp A")]),
+            raising=True,
         )
         result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
         assert KEY not in json.dumps(result)
 
-    async def test_hub_data_oddities_do_not_crash_the_scan(self, fake_client, monkeypatch):
+    async def test_hub_data_oddities_do_not_crash_the_scan(
+        self, fake_client, monkeypatch
+    ):
         monkeypatch.setattr(
-            FakeClient, "__init__", _listing_init([_homey_device(D1, "  ", "Room A")]), raising=True
+            FakeClient,
+            "__init__",
+            _listing_init([_homey_device(D1, "  ", "Room A")]),
+            raising=True,
         )
         result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
         assert result["options"][0]["value"] == D1

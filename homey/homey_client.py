@@ -9,6 +9,8 @@ errors on screen and writes them to the server log.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -18,6 +20,14 @@ import httpx
 # Well under the host's 10 s action limit, so a dead hub answers
 # "Couldn't reach Homey." instead of a host timeout.
 DEFAULT_TIMEOUT = 5.0
+# One public call may make several requests (devices, then zones), and each
+# timeout applies per phase. This caps the whole call under the host's limit.
+DEFAULT_DEADLINE = 4.0
+
+# httpx logs every request URL at INFO and httpcore logs the host at DEBUG;
+# the server log must hold no hub address or device id.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 _DEVICES = "/api/manager/devices/device"
 _ZONES = "/api/manager/zones/zone"
@@ -62,7 +72,7 @@ def _parse_device(raw: Any, zones: dict[str, str]) -> HomeyDevice | None:
     if not isinstance(device_id, str) or not device_id:
         return None
     name = raw.get("name")
-    name = name if isinstance(name, str) and name.strip() else device_id
+    name = name.strip() if isinstance(name, str) and name.strip() else device_id
     zone_id = raw.get("zone")
     zone = zones.get(zone_id) if isinstance(zone_id, str) else None
     capabilities = raw.get("capabilities")
@@ -85,17 +95,30 @@ class HomeyClient:
         api_key: str,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        deadline: float = DEFAULT_DEADLINE,
     ) -> None:
         self.timeout = timeout
+        self.deadline = deadline
         self._http = httpx.AsyncClient(
             base_url=base_url.strip().rstrip("/"),
             headers={"Authorization": f"Bearer {api_key.strip()}"},
             timeout=timeout,
             transport=transport,
+            # Never let the environment route the key through a proxy, and
+            # never follow a redirect (the key would go to the new address).
+            trust_env=False,
+            follow_redirects=False,
         )
 
     def __repr__(self) -> str:  # never leak the key through a repr
         return "HomeyClient()"
+
+    async def _within_deadline(self, work: Any) -> Any:
+        try:
+            async with asyncio.timeout(self.deadline):
+                return await work
+        except TimeoutError:
+            raise HomeyUnreachable() from None
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -103,7 +126,7 @@ class HomeyClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             response = await self._http.request(method, path, **kwargs)
-        except (httpx.HTTPError, ValueError):
+        except Exception:  # noqa: BLE001 - any failure is "not reachable", text never kept
             raise HomeyUnreachable() from None
         if response.status_code in (401, 403):
             raise HomeyAuthError()
@@ -113,7 +136,7 @@ class HomeyClient:
     def _json(response: httpx.Response) -> Any:
         try:
             return response.json()
-        except ValueError:
+        except Exception:  # noqa: BLE001 - bad JSON, or nesting too deep
             raise HomeyUnreachable() from None
 
     @staticmethod
@@ -137,7 +160,7 @@ class HomeyClient:
             if isinstance(zone, dict) and isinstance(zone.get("name"), str)
         }
 
-    async def list_devices(self) -> list[HomeyDevice]:
+    async def _list_devices(self) -> list[HomeyDevice]:
         response = await self._request("GET", _DEVICES)
         if response.status_code != 200:
             raise HomeyUnreachable()
@@ -145,10 +168,14 @@ class HomeyClient:
         if not isinstance(body, dict):
             raise HomeyUnreachable()
         zones = await self._zone_names()
-        devices = (_parse_device(raw, zones) for raw in body.values())
-        return [d for d in devices if d is not None]
+        unique: dict[str, HomeyDevice] = {}
+        for raw in body.values():
+            device = _parse_device(raw, zones)
+            if device is not None:
+                unique.setdefault(device.id, device)
+        return list(unique.values())
 
-    async def get_device(self, device_id: str) -> HomeyDevice | None:
+    async def _get_device(self, device_id: str) -> HomeyDevice | None:
         path = self._device_path(device_id)
         if path is None:
             return None
@@ -162,7 +189,7 @@ class HomeyClient:
             raise HomeyUnreachable()
         return device
 
-    async def set_onoff(self, device_id: str, on: bool) -> None:
+    async def _set_onoff(self, device_id: str, on: bool) -> None:
         path = self._device_path(device_id)
         if path is None:
             raise HomeyDeviceNotFound()
@@ -173,3 +200,12 @@ class HomeyClient:
             raise HomeyDeviceNotFound()
         if not 200 <= response.status_code < 300:
             raise HomeyUnreachable()
+
+    async def list_devices(self) -> list[HomeyDevice]:
+        return await self._within_deadline(self._list_devices())
+
+    async def get_device(self, device_id: str) -> HomeyDevice | None:
+        return await self._within_deadline(self._get_device(device_id))
+
+    async def set_onoff(self, device_id: str, on: bool) -> None:
+        return await self._within_deadline(self._set_onoff(device_id, on))
