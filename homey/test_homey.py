@@ -322,6 +322,18 @@ class TestHubText:
         assert len(device.name) <= 80
         assert device.name.endswith("\u2026")
 
+    async def test_surrogates_and_private_use_characters_are_dropped(self):
+        body = json.dumps({D1: _dev(D1, "a\ud800b\ue000c")}).encode()  # \\ud800 escape
+
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                return httpx.Response(200, json={})
+            return httpx.Response(200, content=body)
+
+        [device] = await _client(handler).list_devices()
+        assert device.name == "abc"
+        device.name.encode("utf-8")  # must be serialisable
+
     async def test_control_and_bidi_characters_are_dropped(self):
         name = "Lamp\u202e A\x1b[31m\nB\u2028C\u200b"
         [device] = await _client(self._hub_with({D1: _dev(D1, name)})).list_devices()
@@ -406,6 +418,27 @@ class TestClientReads:
             return httpx.Response(200, json={D1: _dev(D1, "Lamp")})
 
         client = _client(handler)
+        await client.list_devices()
+        assert (await client.get_device(D1)).zone == "Room A"
+
+    async def test_a_failed_zones_read_keeps_the_last_good_names(self):
+        now = [1000.0]
+        fail = [False]
+
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                if fail[0]:
+                    return httpx.Response(500)
+                return httpx.Response(200, json={Z1: {"id": Z1, "name": "Room A"}})
+            if request.url.path.endswith(D1):
+                return httpx.Response(200, json=_dev(D1, "Lamp"))
+            return httpx.Response(200, json={D1: _dev(D1, "Lamp")})
+
+        client = _client(handler)
+        client._clock = lambda: now[0]
+        await client.list_devices()
+        fail[0] = True
+        now[0] += 61
         await client.list_devices()
         assert (await client.get_device(D1)).zone == "Room A"
 
@@ -1239,6 +1272,18 @@ class TestFailureCache:
         plugin._clock.now += 2.5
         await plugin.fetch()
         assert client.list_devices.await_count == 2
+
+    async def test_a_slow_failure_is_cached_from_when_it_ended(self, live):
+        plugin, client = await live()
+
+        async def times_out():
+            plugin._clock.now += 4.0  # the call itself used up its deadline
+            raise HomeyUnreachable()
+
+        client.list_devices.side_effect = times_out
+        await plugin.fetch()
+        await plugin.fetch()
+        assert client.list_devices.await_count == 1
 
     async def test_a_failure_from_before_an_action_is_not_cached(self, live):
         plugin, client = await live()

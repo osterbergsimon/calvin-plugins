@@ -34,8 +34,6 @@ DEFAULT_TIMEOUT = 5.0
 # timeout applies per phase. This caps the whole call under the host's limit.
 DEFAULT_DEADLINE = 4.0
 
-# httpx logs every request URL at INFO and httpcore logs the host at DEBUG;
-# the server log must hold no hub address or device id.
 # The hub is trusted to be a Homey, not to send sane text or small bodies.
 MAX_NAME_CHARS = 80
 MAX_ID_CHARS = 256
@@ -44,6 +42,8 @@ MAX_BODY_BYTES = 2_000_000
 ZONE_CACHE_SECONDS = 60.0
 ZONE_FAILURE_SECONDS = 5.0
 
+# httpx logs every request URL at INFO and httpcore logs the host at DEBUG;
+# the server log must hold no hub address or device id.
 for _name in ("httpx", "httpcore"):
     logging.getLogger(_name).setLevel(logging.WARNING)
 
@@ -85,8 +85,9 @@ class HomeyDevice:
 def _clean_text(value: Any, fallback: str = "", limit: int = MAX_NAME_CHARS) -> str:
     """Printable, single-spaced text of at most `limit` characters.
 
-    Drops control, format and line/paragraph-separator characters (they carry
-    bidi overrides and escapes), turns other whitespace into one space and ends
+    Drops control, format, surrogate, private-use, unassigned and line/paragraph
+    separator characters (they carry bidi overrides and escapes, or cannot be
+    encoded), turns other whitespace into one space and ends
     an over-long text with an ellipsis. Empty results use `fallback`.
     """
     for candidate in (value, fallback):
@@ -97,7 +98,7 @@ def _clean_text(value: Any, fallback: str = "", limit: int = MAX_NAME_CHARS) -> 
             " "
             if ch.isspace()
             else ""
-            if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp")
+            if unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp")
             else ch
             for ch in head
         )
@@ -229,16 +230,18 @@ class HomeyClient:
         return f"{_DEVICES}/{quote(device_id, safe='')}"
 
     async def _zone_names(self) -> dict[str, str]:
-        """Zone id -> name. Any failure (including a missing scope) gives no labels."""
+        """Zone id -> name, cached. A failure (including a missing scope) keeps the
+        last good names, or none if there never were any."""
         now = self._clock()
         if now < self._zones_until:
             return self._zones
-        zones: dict[str, str] = {}
+        zones = self._zones  # a failed read keeps the last good names
         ttl = ZONE_FAILURE_SECONDS
         try:
             response = await self._request("GET", _ZONES)
             body = self._json(response)
             if response.status_code == 200 and isinstance(body, dict):
+                zones = {}
                 for zone_id, zone in body.items():
                     name = (
                         _clean_text(zone.get("name")) if isinstance(zone, dict) else ""
@@ -628,7 +631,9 @@ class HomeyServicePlugin(ServicePlugin):
         # A failure is cached too, so a dead hub is asked once per window, not
         # once per open screen.
         if generation == self._generation:
-            self._cache = (now, tuple(chosen), items)
+            # Stamped when the read ended: a call that used up its deadline
+            # must still hold for the full window.
+            self._cache = (self._clock(), tuple(chosen), items)
         return {"items": copy.deepcopy(items)}
 
     async def perform_action(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
