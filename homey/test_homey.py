@@ -49,6 +49,10 @@ HomeyUnreachable = client_mod.HomeyUnreachable
 HomeyAuthError = client_mod.HomeyAuthError
 
 
+devices_mod = _load("homey_devices", "homey_devices.py")
+parse_device_ids = devices_mod.parse_device_ids
+
+
 def _dev(did, name, *, zone=Z1, onoff=True, available=True, caps=("onoff",)):
     obj = {"onoff": {"value": onoff}} if "onoff" in caps else {}
     return {
@@ -239,3 +243,21 @@ class TestHomeyClient:
             await _client(handler).list_devices()
         assert KEY not in str(info.value)
         assert info.value.__cause__ is None
+
+
+class TestChosenDevices:
+    @pytest.mark.parametrize("raw", [None, "", " , ,", "   "])
+    def test_empty_inputs_give_empty_list(self, raw):
+        assert parse_device_ids(raw) == []
+
+    def test_trims_drops_empties_and_later_duplicates(self):
+        assert parse_device_ids(" a, b ,,a ") == ["a", "b"]
+
+    def test_single_id(self):
+        assert parse_device_ids(D1) == [D1]
+
+    def test_keeps_order_and_case(self):
+        assert parse_device_ids("B,a,A") == ["B", "a", "A"]
+
+    def test_non_string_is_empty(self):
+        assert parse_device_ids(5) == []
