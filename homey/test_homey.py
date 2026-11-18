@@ -35,8 +35,6 @@ Z1 = "00000000-0000-4000-8000-0000000000a1"
 
 
 def _load(name: str, filename: str):
-    if str(PLUGIN_DIR) not in sys.path:
-        sys.path.insert(0, str(PLUGIN_DIR))
     spec = importlib.util.spec_from_file_location(name, PLUGIN_DIR / filename)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -44,18 +42,18 @@ def _load(name: str, filename: str):
     return module
 
 
-client_mod = _load("homey_client", "homey_client.py")
+plugin_mod = _load("homey_plugin_under_test", "plugin.py")
+client_mod = plugin_mod
 HomeyClient = client_mod.HomeyClient
 HomeyDevice = client_mod.HomeyDevice
 HomeyUnreachable = client_mod.HomeyUnreachable
 HomeyAuthError = client_mod.HomeyAuthError
 
 
-devices_mod = _load("homey_devices", "homey_devices.py")
+devices_mod = plugin_mod
 parse_device_ids = devices_mod.parse_device_ids
 
 
-plugin_mod = _load("homey_plugin_under_test", "plugin.py")
 HomeyServicePlugin = plugin_mod.HomeyServicePlugin
 
 
@@ -376,6 +374,7 @@ class TestContractShape:
         assert isinstance(md, PluginMetadata)
         assert md.type_id == "homey"
         assert md.name == "Homey"
+        assert md.icon == "mdi:lightbulb-outline"
         assert md.instance_identity is None
         assert md.display_schema["kind"] == "switch-grid"
         assert md.display_schema["poll_interval_ms"] == 15000

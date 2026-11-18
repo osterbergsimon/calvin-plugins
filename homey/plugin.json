@@ -19,9 +19,7 @@
   "files": {
     "include": [
       "plugin.py",
-      "plugin.json",
-      "homey_client.py",
-      "homey_devices.py"
+      "plugin.json"
     ],
     "exclude": [
       "*.md",
