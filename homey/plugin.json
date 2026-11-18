@@ -1,0 +1,35 @@
+{
+  "api_version": 1,
+  "id": "homey",
+  "name": "Homey",
+  "version": "0.1.0",
+  "type": "service",
+  "description": "On/off tiles for chosen Homey Pro devices.",
+  "author": "Calvin Team",
+  "license": "MIT",
+  "homepage": "https://github.com/calvin-dashboard/calvin-plugins",
+  "repository": "https://github.com/calvin-dashboard/calvin-plugins",
+  "keywords": [
+    "homey",
+    "smart-home",
+    "switch",
+    "lights",
+    "service"
+  ],
+  "files": {
+    "include": [
+      "plugin.py",
+      "plugin.json",
+      "homey_client.py",
+      "homey_devices.py"
+    ],
+    "exclude": [
+      "*.md",
+      "tests/**",
+      "__pycache__/**"
+    ]
+  },
+  "requirements": {
+    "config_required": true
+  }
+}

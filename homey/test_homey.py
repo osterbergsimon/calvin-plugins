@@ -8,6 +8,7 @@ The hub is always mocked: no test contacts a real Homey.
 
 import importlib.util
 import json
+import logging
 import sys
 import types
 from pathlib import Path
@@ -51,6 +52,10 @@ HomeyAuthError = client_mod.HomeyAuthError
 
 devices_mod = _load("homey_devices", "homey_devices.py")
 parse_device_ids = devices_mod.parse_device_ids
+
+
+plugin_mod = _load("homey_plugin_under_test", "plugin.py")
+HomeyServicePlugin = plugin_mod.HomeyServicePlugin
 
 
 def _dev(did, name, *, zone=Z1, onoff=True, available=True, caps=("onoff",)):
@@ -261,3 +266,242 @@ class TestChosenDevices:
 
     def test_non_string_is_empty(self):
         assert parse_device_ids(5) == []
+
+
+class FakeClient:
+    """Stands in for HomeyClient; records constructor args and calls."""
+
+    instances: list = []
+
+    def __init__(self, base_url, api_key, **kwargs):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.list_devices = AsyncMock(return_value=[])
+        self.set_onoff = AsyncMock()
+        self.get_device = AsyncMock(return_value=None)
+        self.aclose = AsyncMock()
+        FakeClient.instances.append(self)
+
+
+@pytest.fixture
+def fake_client(monkeypatch):
+    FakeClient.instances = []
+    monkeypatch.setattr(plugin_mod, "HomeyClient", FakeClient)
+    return FakeClient
+
+
+GOOD = {"host": "http://hub.example", "api_key": KEY}
+
+
+def _homey_device(did, name, zone=None, has_onoff=True, on=False, available=True):
+    return HomeyDevice(did, name, zone, has_onoff, on, available)
+
+
+class TestContractShape:
+    def test_discoverable_by_loader(self):
+        loader = PluginLoader()
+        module = types.ModuleType("installed_plugin_homey")
+        module.HomeyServicePlugin = HomeyServicePlugin
+        assert loader.register_module(module) == ["homey"]
+
+    def test_no_module_level_hooks(self):
+        for hook in (
+            "register_plugin_types",
+            "create_plugin_instance",
+            "handle_plugin_config_update",
+        ):
+            assert not hasattr(plugin_mod, hook), hook
+
+    def test_is_service_plugin(self):
+        assert issubclass(HomeyServicePlugin, ServicePlugin)
+
+    def test_metadata(self):
+        md = HomeyServicePlugin.metadata
+        assert isinstance(md, PluginMetadata)
+        assert md.type_id == "homey"
+        assert md.name == "Homey"
+        assert md.instance_identity is None
+        assert md.display_schema["kind"] == "switch-grid"
+        assert md.display_schema["poll_interval_ms"] == 15000
+        assert md.display_schema["unreachable_text"] == "Couldn't reach Homey"
+        assert md.display_schema["empty_text"] == "No devices chosen yet."
+        [action] = md.actions
+        assert action.name == "set_onoff"
+        assert action.params["device"].type == "string"
+        assert action.params["on"].type == "boolean"
+
+    def test_devices_field_is_multi_select_scan(self):
+        field = HomeyServicePlugin.metadata.instance_config_schema["devices"]
+        assert field["type"] == "string"
+        assert field["ui"]["component"] == "multi-select-scan"
+
+    def test_host_is_an_endpoint_key_and_api_key_a_secret_key(self):
+        from app.plugins.utils.secrets import endpoint_keys, secret_keys
+
+        schema = HomeyServicePlugin.metadata.instance_config_schema
+        assert schema["host"]["ui"]["endpoint"] is True
+        assert "host" in endpoint_keys(schema)
+        assert secret_keys(schema) == {"api_key"}
+        assert schema["api_key"]["type"] == "password"
+
+    def test_api_key_description_names_both_scopes(self):
+        text = HomeyServicePlugin.metadata.instance_config_schema["api_key"]["description"]
+        assert "homey.device.readonly" in text
+        assert "homey.device.control" in text
+
+
+class TestConfig:
+    async def test_validate_config(self):
+        v = HomeyServicePlugin.validate_config
+        assert await v(GOOD) is True
+        assert await v({**GOOD, "api_key": " "}) is False
+        assert await v({**GOOD, "host": "ftp://x"}) is False
+        assert await v({**GOOD, "host": ""}) is False
+        assert await v({"host": "https://hub.example", "api_key": "k"}) is True
+
+    async def test_initialize_requires_host_and_key(self):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({"host": "", "api_key": ""})
+        with pytest.raises(ValueError):
+            await instance.initialize()
+
+    async def test_initialize_error_text_has_no_key(self):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({"host": "nope", "api_key": KEY})
+        with pytest.raises(ValueError) as info:
+            await instance.initialize()
+        assert KEY not in str(info.value)
+
+    async def test_client_built_and_closed_on_configure(self, fake_client):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({**GOOD, "host": "http://hub.example/"})
+        await instance.initialize()
+        [first] = fake_client.instances
+        assert first.base_url == "http://hub.example"
+        assert first.api_key == KEY
+        await instance.configure(GOOD)
+        first.aclose.assert_awaited()
+        await instance.cleanup()
+
+    async def test_no_log_line_holds_the_key(self, fake_client, caplog):
+        from loguru import logger
+
+        lines = []
+        sink = logger.add(lines.append, level="DEBUG")
+        try:
+            instance = HomeyServicePlugin("homey-x", "Homey")
+            await instance.configure(GOOD)
+            await instance.initialize()
+            await HomeyServicePlugin.test_connection(GOOD)
+            await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+            await instance.cleanup()
+        finally:
+            logger.remove(sink)
+        assert not any(KEY in str(line) for line in lines)
+        assert not any(KEY in r.getMessage() for r in caplog.records)
+
+
+class TestConnection:
+    async def test_success(self, fake_client, monkeypatch):
+        result = await HomeyServicePlugin.test_connection(GOOD)
+        assert result["success"] is True
+        assert KEY not in result["message"]
+        [client] = fake_client.instances
+        client.list_devices.assert_awaited_once()
+        client.aclose.assert_awaited()
+
+    async def test_auth_refused(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _failing_init(HomeyAuthError()), raising=True
+        )
+        result = await HomeyServicePlugin.test_connection(GOOD)
+        assert result == {"success": False, "message": "Homey refused the API key."}
+
+    async def test_unreachable(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _failing_init(HomeyUnreachable()), raising=True
+        )
+        result = await HomeyServicePlugin.test_connection(GOOD)
+        assert result == {"success": False, "message": "Couldn't reach Homey."}
+
+    async def test_blank_config_does_not_call_the_hub(self, fake_client):
+        result = await HomeyServicePlugin.test_connection({"host": "", "api_key": ""})
+        assert result["success"] is False
+        assert fake_client.instances == []
+
+
+def _failing_init(exc):
+    def init(self, base_url, api_key, **kwargs):
+        self.list_devices = AsyncMock(side_effect=exc)
+        self.aclose = AsyncMock()
+        FakeClient.instances.append(self)
+
+    return init
+
+
+class TestScan:
+    async def test_lists_only_onoff_devices_sorted_by_label(self, fake_client, monkeypatch):
+        devices = [
+            _homey_device(D2, "Lamp B", "Room A"),
+            _homey_device(D3, "Sensor", "Room A", has_onoff=False, on=None),
+            _homey_device(D1, "Lamp A", None),
+        ]
+        monkeypatch.setattr(
+            FakeClient, "__init__", _listing_init(devices), raising=True
+        )
+        result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert result == {
+            "options": [
+                {"value": D1, "label": "Lamp A"},
+                {"value": D2, "label": "Lamp B (Room A)"},
+            ]
+        }
+
+    async def test_other_field_returns_none(self, fake_client):
+        assert await HomeyServicePlugin.scan_options_with_config("host", GOOD) is None
+        assert fake_client.instances == []
+
+    async def test_unreachable(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _failing_init(HomeyUnreachable()), raising=True
+        )
+        result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert result == {"options": [], "error": "Couldn't reach Homey."}
+
+    async def test_auth_refused(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _failing_init(HomeyAuthError()), raising=True
+        )
+        result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert result == {"options": [], "error": "Homey refused the API key."}
+
+    async def test_blank_config_gives_error_without_calling_hub(self, fake_client):
+        result = await HomeyServicePlugin.scan_options_with_config(
+            "devices", {"host": "http://hub.example", "api_key": ""}
+        )
+        assert result["options"] == []
+        assert result["error"]
+        assert fake_client.instances == []
+
+    async def test_result_never_contains_the_key(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _listing_init([_homey_device(D1, "Lamp A")]), raising=True
+        )
+        result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert KEY not in json.dumps(result)
+
+    async def test_hub_data_oddities_do_not_crash_the_scan(self, fake_client, monkeypatch):
+        monkeypatch.setattr(
+            FakeClient, "__init__", _listing_init([_homey_device(D1, "  ", "Room A")]), raising=True
+        )
+        result = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        assert result["options"][0]["value"] == D1
+
+
+def _listing_init(devices):
+    def init(self, base_url, api_key, **kwargs):
+        self.list_devices = AsyncMock(return_value=devices)
+        self.aclose = AsyncMock()
+        FakeClient.instances.append(self)
+
+    return init
