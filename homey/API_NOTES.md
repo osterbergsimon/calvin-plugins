@@ -40,4 +40,9 @@ official.
 | `zone` is a zone id | Resolved through the zone list; if that call fails or the scope is missing, the zone label is left out |
 | Status for a bad key or missing scope | 401 and 403 both mean "key refused" |
 | Status for an unknown device | 404 means the device is gone |
+| Status of a successful `PUT .../capability/onoff` | Any 2xx. The plugin then reads the device back and shows what the hub reports |
+| `GET /api/manager/devices/device/:id` | Returns the bare device object (not wrapped), with the same `id` that was asked for; a different `id` is treated as not reachable |
+| `available` | A boolean; anything but `true` counts as unavailable |
+| Certificate of a local `https://` address | Whether it is one a stock `httpx` trusts is not stated. The plugin uses the default trust store only (`trust_env=False`), so `SSL_CERT_FILE` and similar variables are ignored and a private certificate authority cannot be used |
+| Size and text of hub answers | Not stated. Bodies over about 2 MB are treated as not reachable; device and zone names are cut to 80 printable characters; device ids over 256 characters or with control characters are skipped |
 | Any other non-2xx, a timeout, a connect error or a body that is not the expected JSON | The hub is treated as not reachable |

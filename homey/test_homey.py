@@ -304,6 +304,131 @@ class TestClientHardening:
         assert [(d.id, d.name) for d in devices] == [(D1, "Lamp A")]
 
 
+class TestHubText:
+    """Names and ids from the hub are untrusted (M2)."""
+
+    @staticmethod
+    def _hub_with(devices, zones=None):
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                return httpx.Response(200, json=zones or {})
+            return httpx.Response(200, json=devices)
+
+        return handler
+
+    async def test_huge_name_is_capped_with_an_ellipsis(self):
+        raw = {D1: _dev(D1, "x" * 1_000_000)}
+        [device] = await _client(self._hub_with(raw)).list_devices()
+        assert len(device.name) <= 80
+        assert device.name.endswith("\u2026")
+
+    async def test_control_and_bidi_characters_are_dropped(self):
+        name = "Lamp\u202e A\x1b[31m\nB\u2028C\u200b"
+        [device] = await _client(self._hub_with({D1: _dev(D1, name)})).list_devices()
+        assert device.name == "Lamp A[31m B C"
+        assert all(c.isprintable() for c in device.name)
+
+    async def test_whitespace_is_collapsed(self):
+        [device] = await _client(
+            self._hub_with({D1: _dev(D1, "  Lamp \t  A   ")})
+        ).list_devices()
+        assert device.name == "Lamp A"
+
+    async def test_name_with_only_control_characters_falls_back_to_the_id(self):
+        [device] = await _client(
+            self._hub_with({D1: _dev(D1, "\u202e\x07\u200b")})
+        ).list_devices()
+        assert device.name == D1
+
+    async def test_huge_zone_name_is_capped_and_cleaned(self):
+        zones = {Z1: {"id": Z1, "name": "\u202e" + "z" * 100_000}}
+        [device] = await _client(
+            self._hub_with({D1: _dev(D1, "Lamp")}, zones)
+        ).list_devices()
+        assert len(device.zone) <= 80
+        assert "\u202e" not in device.zone
+
+    async def test_overlong_or_control_character_ids_are_dropped(self):
+        long_id = "a" * 257
+        raw = {
+            "1": _dev(long_id, "Long"),
+            "2": _dev("bad\nid", "Newline"),
+            "3": _dev("bad\x1bid", "Escape"),
+            "4": _dev("a" * 256, "Edge"),
+            "5": _dev(D1, "Fine"),
+        }
+        devices = await _client(self._hub_with(raw)).list_devices()
+        assert sorted(d.name for d in devices) == ["Edge", "Fine"]
+
+    async def test_a_body_over_the_cap_is_unreachable(self):
+        body = b"{" + b" " * (client_mod.MAX_BODY_BYTES + 10) + b"}"
+        with pytest.raises(HomeyUnreachable):
+            await _client(lambda r: httpx.Response(200, content=body)).list_devices()
+
+    async def test_the_scan_label_is_clean(self, monkeypatch):
+        raw = {D1: _dev(D1, "x" * 5000 + "\u202e")}
+        monkeypatch.setattr(
+            plugin_mod,
+            "HomeyClient",
+            lambda base, key, **kw: HomeyClient(
+                base, key, transport=_hub(self._hub_with(raw)), **kw
+            ),
+        )
+        scan = await HomeyServicePlugin.scan_options_with_config("devices", GOOD)
+        [option] = scan["options"]
+        assert len(option["label"]) <= 80 and "\u202e" not in option["label"]
+
+
+class TestClientReads:
+    async def test_get_device_with_a_different_id_is_unreachable(self):
+        def handler(request):
+            return httpx.Response(200, json=_dev(D2, "Other"))
+
+        with pytest.raises(HomeyUnreachable):
+            await _client(handler).get_device(D1)
+
+    async def test_get_device_makes_no_zones_call(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request.url.path)
+            return httpx.Response(200, json=_dev(D1, "Lamp"))
+
+        await _client(handler).get_device(D1)
+        assert not any(path.endswith("/zones/zone") for path in seen)
+
+    async def test_get_device_reuses_zone_names_from_the_last_listing(self):
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                return httpx.Response(200, json={Z1: {"id": Z1, "name": "Room A"}})
+            if request.url.path.endswith(D1):
+                return httpx.Response(200, json=_dev(D1, "Lamp"))
+            return httpx.Response(200, json={D1: _dev(D1, "Lamp")})
+
+        client = _client(handler)
+        await client.list_devices()
+        assert (await client.get_device(D1)).zone == "Room A"
+
+    async def test_zone_names_are_cached_for_a_minute(self):
+        calls = {"zones": 0}
+        now = [1000.0]
+
+        def handler(request):
+            if request.url.path.endswith("/zones/zone"):
+                calls["zones"] += 1
+                return httpx.Response(200, json={Z1: {"id": Z1, "name": "Room A"}})
+            return httpx.Response(200, json={D1: _dev(D1, "Lamp")})
+
+        client = _client(handler)
+        client._clock = lambda: now[0]
+        await client.list_devices()
+        await client.list_devices()
+        assert calls["zones"] == 1
+        now[0] += 61
+        await client.list_devices()
+        assert calls["zones"] == 2
+
+
 class TestChosenDevices:
     @pytest.mark.parametrize("raw", [None, "", " , ,", "   "])
     def test_empty_inputs_give_empty_list(self, raw):
@@ -456,6 +581,119 @@ class TestConfig:
             logger.remove(sink)
         assert not any(KEY in str(line) for line in lines)
         assert not any(KEY in r.getMessage() for r in caplog.records)
+
+
+class TestKeyNeverInATraceback:
+    """A raised error must not carry a frame that holds the key (loguru diagnose)."""
+
+    @staticmethod
+    def _sink():
+        from loguru import logger
+
+        lines = []
+        sink = logger.add(lines.append, level="DEBUG", diagnose=True, backtrace=True)
+        return logger, sink, lines
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "SECRETKEY\u00e9",
+            "SECRETKEY\u200b",
+            "SECRET KEY",
+            "SECRET\x00KEY",
+            "SECRET\nKEY",
+        ],
+    )
+    async def test_unusable_key_is_refused_up_front(self, bad):
+        cfg = {**GOOD, "api_key": bad}
+        assert await HomeyServicePlugin.validate_config(cfg) is False
+        result = await HomeyServicePlugin.test_connection(cfg)
+        assert result["success"] is False
+        scan = await HomeyServicePlugin.scan_options_with_config("devices", cfg)
+        assert scan["options"] == []
+
+    async def test_initialize_with_a_non_ascii_key_logs_no_key(self):
+        logger, sink, lines = self._sink()
+        try:
+            instance = HomeyServicePlugin("homey-x", "Homey")
+            await instance.configure({**GOOD, "api_key": "SECRETKEY\u00e9"})
+            try:
+                await instance.initialize()
+            except Exception:  # noqa: BLE001 - the host logs it like this
+                logger.exception("Error initializing plugin {}", "homey-x")
+            else:  # pragma: no cover
+                pytest.fail("initialize must refuse the key")
+        finally:
+            logger.remove(sink)
+        text = "".join(str(line) for line in lines)
+        assert "Error initializing plugin" in text
+        assert "SECRETKEY" not in text
+
+    async def test_client_construction_failure_logs_no_key(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("no client")
+
+        monkeypatch.setattr(httpx, "AsyncClient", boom)
+        logger, sink, lines = self._sink()
+        try:
+            instance = HomeyServicePlugin("homey-x", "Homey")
+            await instance.configure({**GOOD, "api_key": "SECRETKEY-ascii"})
+            try:
+                await instance.initialize()
+            except Exception:  # noqa: BLE001
+                logger.exception("Error initializing plugin {}", "homey-x")
+            else:  # pragma: no cover
+                pytest.fail("initialize must fail")
+        finally:
+            logger.remove(sink)
+        text = "".join(str(line) for line in lines)
+        assert "Error initializing plugin" in text
+        assert "SECRETKEY" not in text
+
+    async def test_client_constructor_error_text_and_frames_hold_no_key(self):
+        with pytest.raises(ValueError) as info:
+            HomeyClient(BASE, "SECRETKEY\u00e9")
+        assert "SECRETKEY" not in str(info.value)
+        assert info.value.__cause__ is None and info.value.__suppress_context__
+        tb = info.value.__traceback__
+        while tb is not None:
+            for value in tb.tb_frame.f_locals.values():
+                assert "SECRETKEY" not in repr(value)
+            tb = tb.tb_next
+
+
+class TestClientLifecycle:
+    async def test_two_initializes_leave_one_open_client(self, fake_client):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure(GOOD)
+        await instance.initialize()
+        await instance.initialize()
+        first, second = fake_client.instances
+        first.aclose.assert_awaited_once()
+        second.aclose.assert_not_awaited()
+        assert instance._client is second
+
+    async def test_a_stopped_plugin_does_not_rebuild_a_client(self, fake_client):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({**GOOD, "devices": D1})
+        await instance.initialize()
+        instance.start()
+        await instance.cleanup()
+        instance.stop()
+        assert (await instance.fetch())["items"][0]["state"] == "unavailable"
+        with pytest.raises(PluginActionError):
+            await instance.perform_action("set_onoff", {"device": D1, "on": True})
+        assert len(fake_client.instances) == 1
+        assert instance._client is None
+
+    async def test_a_running_plugin_rebuilds_after_configure(self, fake_client):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({**GOOD, "devices": D1})
+        await instance.initialize()
+        instance.start()
+        await instance.configure({**GOOD, "devices": D1})
+        await instance.fetch()
+        assert len(fake_client.instances) == 2
 
 
 class TestHostValidation:
@@ -761,11 +999,15 @@ class TestAction:
             }
         }
 
-    async def test_returns_the_real_state_not_the_requested_one(self, live):
+    async def test_returns_the_real_state_not_the_requested_one(
+        self, live, monkeypatch
+    ):
+        monkeypatch.setattr(plugin_mod, "SETTLE_SECONDS", 0.0)
         plugin, client = await live()
         client.get_device.return_value = _homey_device(D1, "Lamp A", on=False)
         result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
         assert result["item"]["state"] == "off"
+        assert result["item"]["action"]["params"]["on"] is True
 
     @pytest.mark.parametrize(
         "device", [D3, "", f" {D1}", f"{D1} ", D1[:-1], f"{D1},{D2}"]
@@ -913,6 +1155,124 @@ class TestAction:
         assert KEY not in json.dumps(result)
 
 
+class TestActionBudgetAndSettle:
+    @pytest.fixture(autouse=True)
+    def _no_settle_wait(self, monkeypatch):
+        monkeypatch.setattr(plugin_mod, "SETTLE_SECONDS", 0.0)
+
+    def test_budget_is_inside_the_host_limit(self):
+        assert plugin_mod.ACTION_BUDGET_SECONDS <= 7.5
+
+    async def test_put_and_read_back_share_one_budget(self, live, monkeypatch):
+        monkeypatch.setattr(plugin_mod, "ACTION_BUDGET_SECONDS", 0.3)
+        plugin, client = await live()
+
+        async def slow_put(*a):
+            await asyncio.sleep(0.2)
+
+        async def slow_read(*a):
+            await asyncio.sleep(0.2)
+            return _homey_device(D1, "Lamp A", on=True)
+
+        client.set_onoff.side_effect = slow_put
+        client.get_device.side_effect = slow_read
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert asyncio.get_running_loop().time() - started < 0.45
+        assert info.value.message == "Couldn't reach Homey."
+
+    async def test_stale_read_then_correct_read_returns_the_real_new_state(self, live):
+        plugin, client = await live()
+        client.get_device.side_effect = [
+            _homey_device(D1, "Lamp A", on=False),
+            _homey_device(D1, "Lamp A", on=True),
+        ]
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert result["item"]["state"] == "on"
+        assert client.get_device.await_count == 2
+
+    async def test_stale_twice_gives_the_real_old_state(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=False)
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert result["item"]["state"] == "off"
+        assert client.get_device.await_count == 2
+
+    async def test_a_matching_read_is_not_retried(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
+        await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert client.get_device.await_count == 1
+
+    async def test_the_retry_waits_before_reading_again(self, live, monkeypatch):
+        monkeypatch.setattr(plugin_mod, "SETTLE_SECONDS", 0.15)
+        plugin, client = await live()
+        times = []
+
+        async def read(*a):
+            times.append(asyncio.get_running_loop().time())
+            return _homey_device(D1, "Lamp A", on=False)
+
+        client.get_device.side_effect = read
+        await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert times[1] - times[0] >= 0.14
+
+    async def test_a_failing_retry_keeps_the_first_honest_read(self, live):
+        plugin, client = await live()
+        client.get_device.side_effect = [
+            _homey_device(D1, "Lamp A", on=False),
+            HomeyUnreachable(),
+        ]
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert result["item"]["state"] == "off"
+
+
+class TestFailureCache:
+    async def test_a_failed_fetch_is_cached_for_two_seconds(self, live):
+        plugin, client = await live()
+        client.list_devices.side_effect = HomeyUnreachable()
+        first = await plugin.fetch()
+        await plugin.fetch()
+        assert client.list_devices.await_count == 1
+        assert all(i["state"] == "unavailable" for i in first["items"])
+        plugin._clock.now += 2.5
+        await plugin.fetch()
+        assert client.list_devices.await_count == 2
+
+    async def test_a_failure_from_before_an_action_is_not_cached(self, live):
+        plugin, client = await live()
+        release = asyncio.Event()
+
+        async def failing():
+            await release.wait()
+            raise HomeyUnreachable()
+
+        client.list_devices.side_effect = failing
+        pending = asyncio.ensure_future(plugin.fetch())
+        await asyncio.sleep(0)
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
+        await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        release.set()
+        await pending
+        client.list_devices.side_effect = None
+        client.list_devices.return_value = [_homey_device(D1, "Lamp A", on=True)]
+        data = await plugin.fetch()
+        assert {i["id"]: i["state"] for i in data["items"]}[D1] == "on"
+
+    async def test_returned_items_are_copies_of_the_cache(self, live):
+        plugin, client = await live()
+        first = await plugin.fetch()
+        first["items"][0]["label"] = "mutated"
+        first["items"].append({"id": "x"})
+        second = await plugin.fetch()
+        assert second["items"][0]["label"] != "mutated"
+        assert len(second["items"]) == 2
+        second["items"][0]["action"]["params"]["on"] = "mutated"
+        third = await plugin.fetch()
+        assert third["items"][0]["action"]["params"]["on"] in (True, False)
+
+
 class TestFetchRaces:
     async def test_fetch_started_before_an_action_cannot_fill_the_cache_after_it(
         self, live
@@ -978,6 +1338,7 @@ class TestFetchRaces:
     async def test_invalid_stored_host_in_an_action_is_a_plain_error(self, live):
         plugin, _ = await live()
         plugin._client = None
+        plugin.start()
         plugin.config["host"] = "nope"
         with pytest.raises(PluginActionError) as info:
             await plugin.perform_action("set_onoff", {"device": D1, "on": True})

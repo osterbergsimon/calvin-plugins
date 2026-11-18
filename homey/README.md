@@ -42,6 +42,10 @@ and a hallway screen with different tiles.
 - Plain `http://` sends the key unencrypted across your local network, so use
   it only on a network you trust. `https://` works when the hub has a valid
   certificate. The plugin never turns certificate checking off.
+- The plugin ignores proxy and certificate environment settings
+  (`trust_env=False`), so a hub whose certificate comes from a private
+  certificate authority cannot be used over `https://`. Use `http://` on a
+  trusted network instead.
 - If you change the hub address, Calvin asks for the key again, so a saved key
   is never sent to a new address.
 - A tap only works for a device in the chosen list. A device removed from
@@ -54,6 +58,13 @@ and a hallway screen with different tiles.
 | Couldn't reach Homey | The hub did not answer. |
 | Homey refused the API key | The key is wrong, or it lacks a scope above. |
 | Can't be switched from here | The device is no longer in the chosen list. |
+
+A switch can succeed while Calvin cannot read the device back (the hub stopped
+answering right after). The tile then shows "Couldn't reach Homey" and goes back
+to its old state even though the device switched; the next refresh, within about
+15 seconds, shows the real state. When the first read still shows the old value,
+Calvin waits a moment and reads once more, and the tile shows what the hub then
+reports.
 
 State changes made elsewhere (the Homey app, a wall switch) appear within
 about 15 seconds.

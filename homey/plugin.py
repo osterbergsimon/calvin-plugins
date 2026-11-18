@@ -6,9 +6,12 @@ to a caller is plain words with no key, address or device detail.
 """
 
 import asyncio
+import copy
+import json
 import logging
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -33,6 +36,14 @@ DEFAULT_DEADLINE = 4.0
 
 # httpx logs every request URL at INFO and httpcore logs the host at DEBUG;
 # the server log must hold no hub address or device id.
+# The hub is trusted to be a Homey, not to send sane text or small bodies.
+MAX_NAME_CHARS = 80
+MAX_ID_CHARS = 256
+MAX_BODY_BYTES = 2_000_000
+# Zone names change rarely; a failed zone read is retried sooner.
+ZONE_CACHE_SECONDS = 60.0
+ZONE_FAILURE_SECONDS = 5.0
+
 for _name in ("httpx", "httpcore"):
     logging.getLogger(_name).setLevel(logging.WARNING)
 
@@ -71,15 +82,51 @@ class HomeyDevice:
     available: bool
 
 
+def _clean_text(value: Any, fallback: str = "", limit: int = MAX_NAME_CHARS) -> str:
+    """Printable, single-spaced text of at most `limit` characters.
+
+    Drops control, format and line/paragraph-separator characters (they carry
+    bidi overrides and escapes), turns other whitespace into one space and ends
+    an over-long text with an ellipsis. Empty results use `fallback`.
+    """
+    for candidate in (value, fallback):
+        if not isinstance(candidate, str):
+            continue
+        head = candidate[: limit * 8]  # never walk a multi-megabyte string
+        kept = "".join(
+            " "
+            if ch.isspace()
+            else ""
+            if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp")
+            else ch
+            for ch in head
+        )
+        text = " ".join(kept.split())
+        if len(text) > limit or (text and len(candidate) > len(head)):
+            text = text[: limit - 1].rstrip() + "\u2026"
+        if text:
+            return text
+    return ""
+
+
+def _valid_key(key: str) -> bool:
+    """A key that can sit in an HTTP header: ASCII, printable, no spaces."""
+    return bool(key) and key.isascii() and key.isprintable() and " " not in key
+
+
 def _parse_device(raw: Any, zones: dict[str, str]) -> HomeyDevice | None:
     """Build a device from one hub entry; a malformed entry never raises."""
     if not isinstance(raw, dict):
         return None
     device_id = raw.get("id")
-    if not isinstance(device_id, str) or not device_id:
+    if (
+        not isinstance(device_id, str)
+        or not device_id
+        or len(device_id) > MAX_ID_CHARS
+        or not device_id.isprintable()
+    ):
         return None
-    name = raw.get("name")
-    name = name.strip() if isinstance(name, str) and name.strip() else device_id
+    name = _clean_text(raw.get("name"), device_id)
     zone_id = raw.get("zone")
     zone = zones.get(zone_id) if isinstance(zone_id, str) else None
     capabilities = raw.get("capabilities")
@@ -95,6 +142,12 @@ def _parse_device(raw: Any, zones: dict[str, str]) -> HomeyDevice | None:
     return HomeyDevice(device_id, name, zone, has_onoff, on, available)
 
 
+@dataclass(frozen=True)
+class _Reply:
+    status_code: int
+    content: bytes
+
+
 class HomeyClient:
     def __init__(
         self,
@@ -106,16 +159,32 @@ class HomeyClient:
     ) -> None:
         self.timeout = timeout
         self.deadline = deadline
-        self._http = httpx.AsyncClient(
-            base_url=base_url.strip().rstrip("/"),
-            headers={"Authorization": f"Bearer {api_key.strip()}"},
-            timeout=timeout,
-            transport=transport,
-            # Never let the environment route the key through a proxy, and
-            # never follow a redirect (the key would go to the new address).
-            trust_env=False,
-            follow_redirects=False,
-        )
+        self._clock = time.monotonic
+        # Zone id -> name, and when it stops being fresh. get_device() reuses
+        # the last names however old; only list reads refresh them.
+        self._zones: dict[str, str] = {}
+        self._zones_until = 0.0
+        headers: dict[str, str] | None = None
+        try:
+            if not _valid_key(api_key.strip()):
+                raise ValueError
+            headers = {"Authorization": f"Bearer {api_key.strip()}"}
+            self._http = httpx.AsyncClient(
+                base_url=base_url.strip().rstrip("/"),
+                headers=headers,
+                timeout=timeout,
+                transport=transport,
+                # Never let the environment route the key through a proxy, and
+                # never follow a redirect (the key would go to the new address).
+                trust_env=False,
+                follow_redirects=False,
+            )
+        except Exception:  # noqa: BLE001 - fixed words; the key must not travel
+            # The raised error's traceback keeps this frame, so empty the
+            # locals that hold the key (loguru prints frame variables).
+            api_key = ""
+            headers = None
+            raise ValueError("The Homey API key or address can't be used.") from None
 
     def __repr__(self) -> str:  # never leak the key through a repr
         return "HomeyClient()"
@@ -130,19 +199,26 @@ class HomeyClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _request(self, method: str, path: str, **kwargs: Any) -> "_Reply":
         try:
-            response = await self._http.request(method, path, **kwargs)
+            async with self._http.stream(method, path, **kwargs) as response:
+                status = response.status_code
+                body = bytearray()
+                if status not in (401, 403):
+                    async for chunk in response.aiter_bytes():
+                        body += chunk
+                        if len(body) > MAX_BODY_BYTES:
+                            raise HomeyUnreachable()
         except Exception:  # noqa: BLE001 - any failure is "not reachable", text never kept
             raise HomeyUnreachable() from None
-        if response.status_code in (401, 403):
+        if status in (401, 403):
             raise HomeyAuthError()
-        return response
+        return _Reply(status, bytes(body))
 
     @staticmethod
-    def _json(response: httpx.Response) -> Any:
+    def _json(reply: "_Reply") -> Any:
         try:
-            return response.json()
+            return json.loads(reply.content)
         except Exception:  # noqa: BLE001 - bad JSON, or nesting too deep
             raise HomeyUnreachable() from None
 
@@ -154,18 +230,26 @@ class HomeyClient:
 
     async def _zone_names(self) -> dict[str, str]:
         """Zone id -> name. Any failure (including a missing scope) gives no labels."""
+        now = self._clock()
+        if now < self._zones_until:
+            return self._zones
+        zones: dict[str, str] = {}
+        ttl = ZONE_FAILURE_SECONDS
         try:
             response = await self._request("GET", _ZONES)
             body = self._json(response)
+            if response.status_code == 200 and isinstance(body, dict):
+                for zone_id, zone in body.items():
+                    name = (
+                        _clean_text(zone.get("name")) if isinstance(zone, dict) else ""
+                    )
+                    if name:
+                        zones[zone_id] = name
+                ttl = ZONE_CACHE_SECONDS
         except (HomeyUnreachable, HomeyAuthError):
-            return {}
-        if response.status_code != 200 or not isinstance(body, dict):
-            return {}
-        return {
-            zone_id: zone["name"]
-            for zone_id, zone in body.items()
-            if isinstance(zone, dict) and isinstance(zone.get("name"), str)
-        }
+            pass
+        self._zones, self._zones_until = zones, now + ttl
+        return zones
 
     async def _list_devices(self) -> list[HomeyDevice]:
         response = await self._request("GET", _DEVICES)
@@ -191,8 +275,9 @@ class HomeyClient:
             return None
         if response.status_code != 200:
             raise HomeyUnreachable()
-        device = _parse_device(self._json(response), await self._zone_names())
-        if device is None:
+        # No zones call: the last listing's names are enough for a read-back.
+        device = _parse_device(self._json(response), self._zones)
+        if device is None or device.id != device_id:
             raise HomeyUnreachable()
         return device
 
@@ -245,6 +330,13 @@ MSG_GONE = "That device isn't available."
 # action become one hub request. An action clears it.
 FETCH_CACHE_SECONDS = 2.0
 
+# One budget for a whole tap (the switch and its read-back, and the settle
+# wait between two reads), inside the host's 10 s action limit.
+ACTION_BUDGET_SECONDS = 7.0
+# A hub can answer the switch before the device reports; one wait and one more
+# read, then the answer is whatever the hub says.
+SETTLE_SECONDS = 0.4
+
 
 def _clean(config: dict[str, Any]) -> tuple[str, str]:
     """(host without trailing slash, trimmed key) from a normalized config."""
@@ -274,7 +366,7 @@ def _valid_host(host: str) -> bool:
 
 
 def _usable(host: str, key: str) -> bool:
-    return _valid_host(host) and bool(key)
+    return _valid_host(host) and _valid_key(key)
 
 
 class HomeyServicePlugin(ServicePlugin):
@@ -380,15 +472,22 @@ class HomeyServicePlugin(ServicePlugin):
         return _clean(self.config)[1]
 
     async def initialize(self) -> None:
-        """Validate config and build the hub client."""
-        host, key = _clean(self.config)
-        if not _valid_host(host):
+        """Validate config and build the hub client.
+
+        No local here holds the key, so a traceback of an error raised from
+        this frame (the host logs it with variables) cannot print it.
+        """
+        await self._close_client()
+        if not _valid_host(self.host):
             raise ValueError(
                 "The Homey hub address must be an http:// or https:// address"
             )
-        if not key:
-            raise ValueError("A Homey API key is required")
-        self._client = HomeyClient(host, key)
+        if not _valid_key(self.api_key):
+            raise ValueError("A usable Homey API key is required")
+        try:
+            self._client = HomeyClient(self.host, self.api_key)
+        except Exception:  # noqa: BLE001 - fixed words only
+            raise ValueError("The Homey API key or address can't be used.") from None
 
     async def cleanup(self) -> None:
         await self._close_client()
@@ -496,8 +595,12 @@ class HomeyServicePlugin(ServicePlugin):
 
     async def _hub(self) -> HomeyClient:
         if self._client is None:
+            # A stopped or cleaned-up plugin must not build a client nobody closes.
+            if not self.is_running():
+                raise HomeyUnreachable()
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:  # pragma: no cover - initialize() sets it or raises
+            raise HomeyUnreachable()
         return self._client
 
     async def fetch(
@@ -514,17 +617,19 @@ class HomeyServicePlugin(ServicePlugin):
             and cached[1] == tuple(chosen)
             and now - cached[0] < FETCH_CACHE_SECONDS
         ):
-            return {"items": cached[2]}
+            return {"items": copy.deepcopy(cached[2])}
         generation = self._generation
         try:
             client = await self._hub()
             by_id = {d.id: d for d in await client.list_devices()}
+            items = [self._item(i, by_id.get(i)) for i in chosen]
         except Exception:  # noqa: BLE001 - keep the tiles on screen, say "Not responding"
-            return {"items": [self._item(i, None, "Unknown device") for i in chosen]}
-        items = [self._item(i, by_id.get(i)) for i in chosen]
+            items = [self._item(i, None, "Unknown device") for i in chosen]
+        # A failure is cached too, so a dead hub is asked once per window, not
+        # once per open screen.
         if generation == self._generation:
             self._cache = (now, tuple(chosen), items)
-        return {"items": items}
+        return {"items": copy.deepcopy(items)}
 
     async def perform_action(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
         """Switch one chosen device. The chosen list is the only allowlist."""
@@ -541,8 +646,19 @@ class HomeyServicePlugin(ServicePlugin):
             client = await self._hub()
             self._cache = None
             self._generation += 1
-            await client.set_onoff(device_id, on)
-            device = await client.get_device(device_id)
+            async with asyncio.timeout(ACTION_BUDGET_SECONDS):
+                await client.set_onoff(device_id, on)
+                device = await client.get_device(device_id)
+                if device is not None and device.on != on:
+                    # The hub may answer before the device reports: look once
+                    # more, then show what the hub says, never the request.
+                    await asyncio.sleep(SETTLE_SECONDS)
+                    try:
+                        device = await client.get_device(device_id)
+                    except HomeyUnreachable:
+                        pass  # keep the first honest read
+        except TimeoutError:
+            raise PluginActionError(MSG_UNREACHABLE) from None
         except HomeyAuthError:
             raise PluginActionError(MSG_KEY_REFUSED) from None
         except HomeyDeviceNotFound:
