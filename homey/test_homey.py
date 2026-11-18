@@ -912,3 +912,74 @@ class TestAction:
         client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
         result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
         assert KEY not in json.dumps(result)
+
+
+class TestFetchRaces:
+    async def test_fetch_started_before_an_action_cannot_fill_the_cache_after_it(
+        self, live
+    ):
+        plugin, client = await live()
+        gate = asyncio.Event()
+        hub = client.list_devices.return_value
+
+        async def slow(*a, **k):
+            await gate.wait()
+            return hub
+
+        client.list_devices.side_effect = slow
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
+        pending = asyncio.create_task(plugin.fetch())
+        await asyncio.sleep(0)  # the fetch is now waiting on the hub
+        await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        gate.set()
+        await pending
+        calls = client.list_devices.await_count
+        client.list_devices.side_effect = None
+        await plugin.fetch()
+        assert (
+            client.list_devices.await_count == calls + 1
+        )  # not served from the stale cache
+
+    async def test_fetch_started_before_configure_cannot_fill_the_cache_after_it(
+        self, live
+    ):
+        plugin, client = await live(devices_cfg=f"{D1},{D2}")
+        gate = asyncio.Event()
+        hub = client.list_devices.return_value
+
+        async def slow(*a, **k):
+            await gate.wait()
+            return hub
+
+        client.list_devices.side_effect = slow
+        pending = asyncio.create_task(plugin.fetch())
+        await asyncio.sleep(0)
+        await plugin.configure({**GOOD, "devices": D2})
+        gate.set()
+        await pending
+        assert [i["id"] for i in (await plugin.fetch())["items"]] == [D2]
+
+    async def test_cache_holds_only_for_the_same_chosen_list(self, live):
+        plugin, client = await live(devices_cfg=f"{D1},{D2}")
+        await plugin.fetch()
+        plugin.config["devices"] = D2  # changed without going through configure()
+        assert [i["id"] for i in (await plugin.fetch())["items"]] == [D2]
+
+    async def test_configure_drops_the_old_client_before_closing_it(self, live):
+        plugin, client = await live()
+        seen = []
+
+        async def closing():
+            seen.append(plugin._client)
+
+        client.aclose.side_effect = closing
+        await plugin.configure({**GOOD, "devices": D1})
+        assert seen == [None]
+
+    async def test_invalid_stored_host_in_an_action_is_a_plain_error(self, live):
+        plugin, _ = await live()
+        plugin._client = None
+        plugin.config["host"] = "nope"
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert info.value.message == "Couldn't reach Homey."

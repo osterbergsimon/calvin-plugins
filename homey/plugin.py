@@ -152,7 +152,10 @@ class HomeyServicePlugin(ServicePlugin):
         super().__init__(plugin_id, name, enabled)
         self._client: HomeyClient | None = None
         self._clock = time.monotonic
-        self._cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._cache: tuple[float, tuple[str, ...], list[dict[str, Any]]] | None = None
+        # Bumped by every action and config change; a fetch that began before
+        # one of them must not write its (possibly stale) result to the cache.
+        self._generation = 0
 
     @property
     def host(self) -> str:
@@ -183,9 +186,10 @@ class HomeyServicePlugin(ServicePlugin):
 
     async def _close_client(self) -> None:
         self._cache = None
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        self._generation += 1
+        client, self._client = self._client, None
+        if client:
+            await client.aclose()
 
     @classmethod
     async def validate_config(cls, config: dict[str, Any]) -> bool:
@@ -290,15 +294,22 @@ class HomeyServicePlugin(ServicePlugin):
         if not chosen:
             return {"items": []}
         now = self._clock()
-        if self._cache is not None and now - self._cache[0] < FETCH_CACHE_SECONDS:
-            return {"items": self._cache[1]}
+        cached = self._cache
+        if (
+            cached
+            and cached[1] == tuple(chosen)
+            and now - cached[0] < FETCH_CACHE_SECONDS
+        ):
+            return {"items": cached[2]}
+        generation = self._generation
         try:
             client = await self._hub()
             by_id = {d.id: d for d in await client.list_devices()}
         except Exception:  # noqa: BLE001 - keep the tiles on screen, say "Not responding"
             return {"items": [self._item(i, None, "Unknown device") for i in chosen]}
         items = [self._item(i, by_id.get(i)) for i in chosen]
-        self._cache = (now, items)
+        if generation == self._generation:
+            self._cache = (now, tuple(chosen), items)
         return {"items": items}
 
     async def perform_action(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -314,17 +325,19 @@ class HomeyServicePlugin(ServicePlugin):
             raise PluginActionRefused(MSG_REFUSED)
         try:
             client = await self._hub()
-            await client.set_onoff(device_id, on)
             self._cache = None
+            self._generation += 1
+            await client.set_onoff(device_id, on)
             device = await client.get_device(device_id)
         except HomeyAuthError:
             raise PluginActionError(MSG_KEY_REFUSED) from None
         except HomeyDeviceNotFound:
             raise PluginActionError(MSG_GONE) from None
-        except HomeyUnreachable:
+        except (HomeyUnreachable, ValueError):  # ValueError: stored address unusable
             raise PluginActionError(MSG_UNREACHABLE) from None
         finally:
             self._cache = None
+            self._generation += 1
         if device is None:
             raise PluginActionError(MSG_UNREACHABLE)
         return {"item": self._item(device_id, device)}
