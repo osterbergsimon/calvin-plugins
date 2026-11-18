@@ -6,20 +6,31 @@ to a caller is plain words with no key, address or device detail.
 """
 
 import re
+import time
 from typing import Any
 
 import httpx
 
-from app.plugins.actions import PluginActionError
+from app.plugins.actions import PluginActionError, PluginActionRefused
 from app.plugins.definitions import PluginMetadata
 from app.plugins.protocols import ServicePlugin
 from homey_client import (
     HomeyAuthError,
     HomeyClient,
+    HomeyDevice,
+    HomeyDeviceNotFound,
+    HomeyUnreachable,
 )
+from homey_devices import parse_device_ids
 
 MSG_UNREACHABLE = "Couldn't reach Homey."
 MSG_KEY_REFUSED = "Homey refused the API key."
+MSG_REFUSED = "Can't be switched from here."
+MSG_GONE = "That device isn't available."
+
+# A short per-instance cache so the refetches every open screen makes after an
+# action become one hub request. An action clears it.
+FETCH_CACHE_SECONDS = 2.0
 
 
 def _clean(config: dict[str, Any]) -> tuple[str, str]:
@@ -140,6 +151,8 @@ class HomeyServicePlugin(ServicePlugin):
     def __init__(self, plugin_id: str, name: str, enabled: bool = True):
         super().__init__(plugin_id, name, enabled)
         self._client: HomeyClient | None = None
+        self._clock = time.monotonic
+        self._cache: tuple[float, list[dict[str, Any]]] | None = None
 
     @property
     def host(self) -> str:
@@ -169,6 +182,7 @@ class HomeyServicePlugin(ServicePlugin):
         await self._close_client()
 
     async def _close_client(self) -> None:
+        self._cache = None
         if self._client:
             await self._client.aclose()
             self._client = None
@@ -231,5 +245,86 @@ class HomeyServicePlugin(ServicePlugin):
         options.sort(key=lambda o: (o["label"].casefold(), o["value"]))
         return {"options": options}
 
+    # -- items ------------------------------------------------------------
+
+    @staticmethod
+    def _item(
+        device_id: str, device: HomeyDevice | None, label: str | None = None
+    ) -> dict:
+        """One tile. Anything that cannot be switched is unavailable with no action."""
+        usable = (
+            device is not None
+            and device.has_onoff
+            and device.available
+            and device.on is not None
+        )
+        if device is not None:
+            label = device.name
+        state = ("on" if device.on else "off") if usable else "unavailable"
+        return {
+            "id": device_id,
+            "label": label or "Missing device",
+            "group": device.zone if device is not None else None,
+            "state": state,
+            "action": (
+                {
+                    "name": "set_onoff",
+                    "params": {"device": device_id, "on": state == "off"},
+                }
+                if usable
+                else None
+            ),
+        }
+
+    async def _hub(self) -> HomeyClient:
+        if self._client is None:
+            await self.initialize()
+        assert self._client is not None
+        return self._client
+
+    async def fetch(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> dict[str, Any]:
+        """The chosen devices, in the chosen order, from one hub read (cached 2 s)."""
+        chosen = parse_device_ids(self.config.get("devices"))
+        if not chosen:
+            return {"items": []}
+        now = self._clock()
+        if self._cache is not None and now - self._cache[0] < FETCH_CACHE_SECONDS:
+            return {"items": self._cache[1]}
+        try:
+            client = await self._hub()
+            by_id = {d.id: d for d in await client.list_devices()}
+        except Exception:  # noqa: BLE001 - keep the tiles on screen, say "Not responding"
+            return {"items": [self._item(i, None, "Unknown device") for i in chosen]}
+        items = [self._item(i, by_id.get(i)) for i in chosen]
+        self._cache = (now, items)
+        return {"items": items}
+
     async def perform_action(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
-        raise PluginActionError("This plugin has no actions.")  # replaced in Task 3.5
+        """Switch one chosen device. The chosen list is the only allowlist."""
+        if name != "set_onoff":
+            raise PluginActionError("This plugin has no such action.")
+        device_id = params.get("device")
+        on = params.get("on")
+        if not isinstance(device_id, str) or not isinstance(on, bool):
+            raise PluginActionError("That request wasn't understood.")
+        # Exact string equality against the current chosen list, before any hub call.
+        if device_id not in parse_device_ids(self.config.get("devices")):
+            raise PluginActionRefused(MSG_REFUSED)
+        try:
+            client = await self._hub()
+            await client.set_onoff(device_id, on)
+            self._cache = None
+            device = await client.get_device(device_id)
+        except HomeyAuthError:
+            raise PluginActionError(MSG_KEY_REFUSED) from None
+        except HomeyDeviceNotFound:
+            raise PluginActionError(MSG_GONE) from None
+        except HomeyUnreachable:
+            raise PluginActionError(MSG_UNREACHABLE) from None
+        finally:
+            self._cache = None
+        if device is None:
+            raise PluginActionError(MSG_UNREACHABLE)
+        return {"item": self._item(device_id, device)}

@@ -607,3 +607,308 @@ def _listing_init(devices):
         FakeClient.instances.append(self)
 
     return init
+
+
+try:
+    from app.plugins.actions import PluginActionError, PluginActionRefused
+except ImportError as e:  # pragma: no cover
+    pytest.skip(f"Backend dependencies not available: {e}", allow_module_level=True)
+
+HomeyDeviceNotFound = client_mod.HomeyDeviceNotFound
+
+
+class Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+async def live(fake_client):
+    """A configured, initialized plugin with a stubbed client and a fake clock."""
+
+    async def make(devices_cfg=f"{D2},{D1}", hub=None):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({**GOOD, "devices": devices_cfg})
+        instance._clock = Clock()
+        await instance.initialize()
+        client = fake_client.instances[-1]
+        client.list_devices.return_value = (
+            hub
+            if hub is not None
+            else [
+                _homey_device(D1, "Lamp A", "Room A", on=False),
+                _homey_device(D2, "Lamp B", "Room B", on=True),
+                _homey_device(D3, "Lamp C", "Room A", on=True),
+            ]
+        )
+        return instance, client
+
+    return make
+
+
+class TestFetch:
+    async def test_chosen_devices_in_chosen_order_with_explicit_targets(self, live):
+        plugin, _ = await live()
+        data = await plugin.fetch()
+        assert [i["id"] for i in data["items"]] == [D2, D1]
+        lamp_b, lamp_a = data["items"]
+        assert lamp_b == {
+            "id": D2,
+            "label": "Lamp B",
+            "group": "Room B",
+            "state": "on",
+            "action": {"name": "set_onoff", "params": {"device": D2, "on": False}},
+        }
+        assert lamp_a["state"] == "off"
+        assert lamp_a["action"]["params"] == {"device": D1, "on": True}
+
+    async def test_unchosen_device_never_appears(self, live):
+        plugin, _ = await live()
+        ids = [i["id"] for i in (await plugin.fetch())["items"]]
+        assert D3 not in ids
+
+    async def test_nothing_chosen_gives_no_items_and_no_hub_call(self, live):
+        plugin, client = await live(devices_cfg="")
+        assert await plugin.fetch() == {"items": []}
+        client.list_devices.assert_not_awaited()
+
+    async def test_missing_non_onoff_or_unavailable_device_is_unavailable(self, live):
+        hub = [
+            _homey_device(D1, "Sensor", "Room A", has_onoff=False, on=None),
+            _homey_device(D2, "Lamp B", "Room A", on=True, available=False),
+        ]
+        plugin, _ = await live(devices_cfg=f"{D1},{D2},{D3}", hub=hub)
+        sensor, lamp, missing = (await plugin.fetch())["items"]
+        for item in (sensor, lamp, missing):
+            assert item["state"] == "unavailable"
+            assert item["action"] is None
+        assert sensor["label"] == "Sensor"
+        assert lamp["label"] == "Lamp B"
+        assert missing["label"] == "Missing device"
+        assert missing["group"] is None
+
+    async def test_device_with_unknown_on_state_is_unavailable(self, live):
+        plugin, _ = await live(
+            hub=[_homey_device(D1, "Lamp A", on=None)], devices_cfg=D1
+        )
+        [item] = (await plugin.fetch())["items"]
+        assert item["state"] == "unavailable" and item["action"] is None
+
+    @pytest.mark.parametrize(
+        "exc", [HomeyUnreachable(), HomeyAuthError(), ValueError("x")]
+    )
+    async def test_hub_failure_makes_every_chosen_tile_unavailable(self, live, exc):
+        plugin, client = await live()
+        client.list_devices.side_effect = exc
+        data = await plugin.fetch()
+        assert [i["id"] for i in data["items"]] == [D2, D1]
+        assert all(
+            i["state"] == "unavailable" and i["action"] is None for i in data["items"]
+        )
+        assert KEY not in json.dumps(data)
+
+    async def test_duplicate_chosen_ids_make_one_tile(self, live):
+        plugin, _ = await live(devices_cfg=f"{D1}, {D1},")
+        assert [i["id"] for i in (await plugin.fetch())["items"]] == [D1]
+
+    async def test_two_fetches_within_two_seconds_make_one_hub_call(self, live):
+        plugin, client = await live()
+        await plugin.fetch()
+        plugin._clock.now += 1.9
+        await plugin.fetch()
+        assert client.list_devices.await_count == 1
+        plugin._clock.now += 0.2
+        await plugin.fetch()
+        assert client.list_devices.await_count == 2
+
+    async def test_cache_is_not_shared_between_instances(self, live):
+        a, client_a = await live()
+        b, client_b = await live()
+        await a.fetch()
+        await b.fetch()
+        client_a.list_devices.assert_awaited_once()
+        client_b.list_devices.assert_awaited_once()
+
+    async def test_configure_clears_the_cache(self, live):
+        plugin, client = await live()
+        await plugin.fetch()
+        await plugin.configure({**GOOD, "devices": D1})
+        # a new client is built lazily with the new config
+        assert (await plugin.fetch())["items"][0]["id"] == D1
+
+    async def test_fetch_output_has_no_config(self, live):
+        plugin, _ = await live()
+        text = json.dumps(await plugin.fetch())
+        assert KEY not in text and "hub.example" not in text
+
+
+class TestAction:
+    async def test_sets_onoff_then_returns_the_read_back_item(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", "Room A", on=True)
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        client.set_onoff.assert_awaited_once_with(D1, True)
+        client.get_device.assert_awaited_once_with(D1)
+        assert result == {
+            "item": {
+                "id": D1,
+                "label": "Lamp A",
+                "group": "Room A",
+                "state": "on",
+                "action": {"name": "set_onoff", "params": {"device": D1, "on": False}},
+            }
+        }
+
+    async def test_returns_the_real_state_not_the_requested_one(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=False)
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert result["item"]["state"] == "off"
+
+    @pytest.mark.parametrize(
+        "device", [D3, "", f" {D1}", f"{D1} ", D1[:-1], f"{D1},{D2}"]
+    )
+    async def test_device_not_chosen_is_refused_and_hub_never_called(
+        self, live, device
+    ):
+        plugin, client = await live(devices_cfg=D1)
+        with pytest.raises(PluginActionRefused):
+            await plugin.perform_action("set_onoff", {"device": device, "on": True})
+        client.set_onoff.assert_not_awaited()
+        client.get_device.assert_not_awaited()
+        client.list_devices.assert_not_awaited()
+
+    async def test_case_difference_is_refused(self, live):
+        plugin, client = await live(devices_cfg="abc-def")
+        with pytest.raises(PluginActionRefused):
+            await plugin.perform_action("set_onoff", {"device": "ABC-DEF", "on": True})
+        client.set_onoff.assert_not_awaited()
+
+    async def test_device_removed_from_settings_after_screen_loaded_is_refused(
+        self, live
+    ):
+        plugin, client = await live(devices_cfg=f"{D1},{D2}")
+        await plugin.fetch()
+        await plugin.configure({**GOOD, "devices": D2})
+        client = FakeClient.instances[-1]
+        with pytest.raises(PluginActionRefused):
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        client.set_onoff.assert_not_awaited()
+
+    async def test_empty_chosen_list_refuses_everything(self, live):
+        plugin, client = await live(devices_cfg="")
+        with pytest.raises(PluginActionRefused):
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        client.set_onoff.assert_not_awaited()
+
+    async def test_refusal_message_is_plain_words(self, live):
+        plugin, _ = await live()
+        with pytest.raises(PluginActionRefused) as info:
+            await plugin.perform_action("set_onoff", {"device": D3, "on": True})
+        assert info.value.message == "Can't be switched from here."
+        assert D3 not in info.value.message
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"on": True},
+            {"device": 5, "on": True},
+            {"device": D1},
+            {"device": D1, "on": "true"},
+            {"device": D1, "on": 1},
+            {},
+        ],
+    )
+    async def test_wrong_params_never_reach_the_hub(self, live, params):
+        plugin, client = await live()
+        with pytest.raises(PluginActionError):
+            await plugin.perform_action("set_onoff", params)
+        client.set_onoff.assert_not_awaited()
+
+    async def test_action_clears_the_cache(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
+        await plugin.fetch()
+        await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        await plugin.fetch()
+        assert client.list_devices.await_count == 2
+
+    async def test_failed_action_also_clears_the_cache(self, live):
+        plugin, client = await live()
+        client.set_onoff.side_effect = HomeyUnreachable()
+        await plugin.fetch()
+        with pytest.raises(PluginActionError):
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        await plugin.fetch()
+        assert client.list_devices.await_count == 2
+
+    async def test_unreachable_during_action(self, live):
+        plugin, client = await live()
+        client.set_onoff.side_effect = HomeyUnreachable()
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert not isinstance(info.value, PluginActionRefused)
+        assert info.value.message == "Couldn't reach Homey."
+
+    async def test_bad_key_during_action(self, live):
+        plugin, client = await live()
+        client.set_onoff.side_effect = HomeyAuthError()
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert info.value.message == "Homey refused the API key."
+
+    async def test_device_gone_on_hub(self, live):
+        plugin, client = await live()
+        client.set_onoff.side_effect = HomeyDeviceNotFound()
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert info.value.message == "That device isn't available."
+
+    async def test_failed_read_back_is_an_error_not_a_success_item(self, live):
+        plugin, client = await live()
+        client.get_device.side_effect = HomeyUnreachable()
+        with pytest.raises(PluginActionError) as info:
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert info.value.message == "Couldn't reach Homey."
+
+    async def test_read_back_missing_device_is_an_error(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = None
+        with pytest.raises(PluginActionError):
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+
+    async def test_unexpected_exception_text_never_escapes_as_action_error(self, live):
+        plugin, client = await live()
+        client.set_onoff.side_effect = RuntimeError(f"boom {KEY}")
+        with pytest.raises(
+            Exception
+        ) as info:  # host maps any non-action error to a generic 500
+            await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert (
+            not isinstance(info.value, PluginActionError)
+            or KEY not in info.value.message
+        )
+
+    async def test_unknown_action_name(self, live):
+        plugin, client = await live()
+        with pytest.raises(PluginActionError):
+            await plugin.perform_action("reboot", {"device": D1, "on": True})
+        client.set_onoff.assert_not_awaited()
+
+    async def test_unavailable_read_back_item_has_no_action(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(
+            D1, "Lamp A", on=True, available=False
+        )
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert result["item"]["state"] == "unavailable"
+        assert result["item"]["action"] is None
+
+    async def test_result_has_no_config(self, live):
+        plugin, client = await live()
+        client.get_device.return_value = _homey_device(D1, "Lamp A", on=True)
+        result = await plugin.perform_action("set_onoff", {"device": D1, "on": True})
+        assert KEY not in json.dumps(result)
