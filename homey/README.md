@@ -57,7 +57,7 @@ and a hallway screen with different tiles.
 | Not responding | The hub or the device didn't answer. The tile keeps the name and room it last had. |
 | Not found in Homey | The device was deleted in Homey. Scan again and pick the devices to show. |
 | Couldn't reach Homey. | The hub did not answer. |
-| Homey refused the API key. | The key is wrong, or it lacks a scope above. Until the Calvin fix for this ships (branch `fix/switch-grid-errors`), the tile shows "Couldn't reach Homey." instead. |
+| Homey refused the API key. | The key is wrong, or it lacks a scope above. Until a Calvin update with this message ships, the tile shows "Couldn't reach Homey." instead. |
 | Can't be switched from here | The device is no longer in the chosen list. |
 | That device isn't available. | The device was deleted since the last refresh. |
 

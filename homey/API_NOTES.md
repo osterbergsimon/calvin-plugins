@@ -53,3 +53,9 @@ The client is built with `trust_env=False`, so proxy and certificate
 environment settings (`SSL_CERT_FILE` and similar) are ignored. A hub whose
 certificate comes from a private certificate authority therefore cannot be used
 over `https://`; use `http://` on a trusted network.
+
+## Tile message for a refused key
+
+The tile text "Homey refused the API key." appears only once the Calvin fix on
+branch `fix/switch-grid-errors` ships; until then the tile shows
+"Couldn't reach Homey." and the README says so.

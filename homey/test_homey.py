@@ -1081,6 +1081,43 @@ class TestFetch:
             ("Unknown device", None)
         ] * 2
 
+    async def test_repeated_failures_keep_labels_and_a_good_read_updates_them(
+        self, live
+    ):
+        plugin, client = await live(devices_cfg=D1)
+        await plugin.fetch()
+        good = client.list_devices.return_value
+        client.list_devices.side_effect = HomeyUnreachable()
+        for _ in range(2):
+            plugin._clock.now += 5
+            [item] = (await plugin.fetch())["items"]
+            assert (item["label"], item["group"]) == ("Lamp A", "Room A")
+        client.list_devices.side_effect = None
+        client.list_devices.return_value = [_homey_device(D1, "Lamp A2", "Room Z")]
+        plugin._clock.now += 5
+        await plugin.fetch()
+        client.list_devices.side_effect = HomeyUnreachable()
+        plugin._clock.now += 5
+        [item] = (await plugin.fetch())["items"]
+        assert (item["label"], item["group"]) == ("Lamp A2", "Room Z")
+        assert good
+
+    async def test_read_started_before_configure_cannot_restore_labels(self, live):
+        plugin, client = await live(devices_cfg=D1)
+        gate = asyncio.Event()
+
+        async def slow():
+            await gate.wait()
+            return [_homey_device(D1, "Lamp A", "Room A")]
+
+        client.list_devices.side_effect = slow
+        task = asyncio.create_task(plugin.fetch())
+        await asyncio.sleep(0)
+        await plugin.configure({**GOOD, "devices": D1})
+        gate.set()
+        await task
+        assert plugin._last_seen == {}
+
     async def test_configure_clears_the_last_good_labels(self, live):
         plugin, client = await live()
         await plugin.fetch()
