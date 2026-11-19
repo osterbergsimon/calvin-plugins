@@ -550,7 +550,9 @@ class HomeyServicePlugin(ServicePlugin):
                 await client.aclose()
         switchable = sum(1 for d in devices if d.has_onoff)
         if switchable == 0:
-            message = "Connected, but Homey has no devices that can be switched on and off."
+            message = (
+                "Connected, but Homey has no devices that can be switched on and off."
+            )
         elif switchable == 1:
             message = "Connected. 1 device can be switched."
         else:

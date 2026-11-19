@@ -858,9 +858,9 @@ class TestConnection:
     async def test_success_counts_only_switchable_devices(
         self, fake_client, monkeypatch, switchable, message
     ):
-        devices = [
-            _homey_device(f"id-{n}", f"Lamp {n}") for n in range(switchable)
-        ] + [_homey_device("sensor", "Sensor", has_onoff=False, on=None)]
+        devices = [_homey_device(f"id-{n}", f"Lamp {n}") for n in range(switchable)] + [
+            _homey_device("sensor", "Sensor", has_onoff=False, on=None)
+        ]
         monkeypatch.setattr(
             FakeClient, "__init__", _listing_init(devices), raising=True
         )
