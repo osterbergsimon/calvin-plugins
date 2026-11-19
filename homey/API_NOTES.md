@@ -46,3 +46,10 @@ official.
 | Certificate of a local `https://` address | Whether it is one a stock `httpx` trusts is not stated. The plugin uses the default trust store only (`trust_env=False`), so `SSL_CERT_FILE` and similar variables are ignored and a private certificate authority cannot be used |
 | Size and text of hub answers | Not stated. Bodies over about 2 MB are treated as not reachable; device and zone names are cut to 80 printable characters; device ids over 256 characters or with control characters are skipped |
 | Any other non-2xx, a timeout, a connect error or a body that is not the expected JSON | The hub is treated as not reachable |
+
+## Environment settings
+
+The client is built with `trust_env=False`, so proxy and certificate
+environment settings (`SSL_CERT_FILE` and similar) are ignored. A hub whose
+certificate comes from a private certificate authority therefore cannot be used
+over `https://`; use `http://` on a trusted network.

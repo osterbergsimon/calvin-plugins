@@ -372,6 +372,19 @@ def _usable(host: str, key: str) -> bool:
     return _valid_host(host) and _valid_key(key)
 
 
+MSG_ENTER_HOST = "Enter the hub address, starting with http:// or https://."
+MSG_ENTER_KEY = "Enter the API key."
+
+
+def _config_problem(host: str, key: str) -> str | None:
+    """The sentence for the first thing wrong with the typed address and key."""
+    if not _valid_host(host):
+        return MSG_ENTER_HOST
+    if not _valid_key(key):
+        return MSG_ENTER_KEY
+    return None
+
+
 class HomeyServicePlugin(ServicePlugin):
     """Switch chosen Homey Pro devices on and off."""
 
@@ -381,7 +394,7 @@ class HomeyServicePlugin(ServicePlugin):
         description="On/off tiles for chosen Homey Pro devices.",
         icon="mdi:lightbulb-outline",
         default_instance_name="Homey",
-        instance_label="hub",
+        instance_label="Homey switches",
         instance_config_schema={
             "host": {
                 "type": "string",
@@ -403,8 +416,8 @@ class HomeyServicePlugin(ServicePlugin):
                 "type": "password",
                 "label": "API key",
                 "description": (
-                    "In the Homey app: Settings → API Keys. Give the key the scopes "
-                    "homey.device.readonly and homey.device.control."
+                    "In Homey: Settings \u2192 API keys. "
+                    "Allow it to view and control devices."
                 ),
                 "required": True,
                 "default": "",
@@ -417,7 +430,11 @@ class HomeyServicePlugin(ServicePlugin):
             "devices": {
                 "type": "string",
                 "label": "Devices",
-                "description": "The devices a tap on this screen can switch.",
+                "description": (
+                    "Choose Scan, then pick the devices to show. "
+                    "Only these can be switched."
+                ),
+                "required": True,
                 "default": "",
                 "ui": {"component": "multi-select-scan"},
             },
@@ -452,8 +469,8 @@ class HomeyServicePlugin(ServicePlugin):
             "kind": "switch-grid",
             "data_path": "$.items",
             "poll_interval_ms": 15000,
-            "unreachable_text": "Couldn't reach Homey",
-            "empty_text": "No devices chosen yet.",
+            "unreachable_text": "Couldn't reach Homey.",
+            "empty_text": "No devices chosen yet. Pick them in Settings.",
         },
     )
 
@@ -465,6 +482,9 @@ class HomeyServicePlugin(ServicePlugin):
         # Bumped by every action and config change; a fetch that began before
         # one of them must not write its (possibly stale) result to the cache.
         self._generation = 0
+        # The last good (label, group) per chosen id, so a failed read keeps the
+        # tiles named. Only these two texts, only chosen ids; cleared on configure.
+        self._last_seen: dict[str, tuple[str, str | None]] = {}
 
     @property
     def host(self) -> str:
@@ -482,11 +502,9 @@ class HomeyServicePlugin(ServicePlugin):
         """
         await self._close_client()
         if not _valid_host(self.host):
-            raise ValueError(
-                "The Homey hub address must be an http:// or https:// address"
-            )
+            raise ValueError("The hub address must start with http:// or https://.")
         if not _valid_key(self.api_key):
-            raise ValueError("A usable Homey API key is required")
+            raise ValueError("Enter the Homey API key.")
         try:
             self._client = HomeyClient(self.host, self.api_key)
         except Exception:  # noqa: BLE001 - fixed words only
@@ -499,6 +517,7 @@ class HomeyServicePlugin(ServicePlugin):
         """Apply config; drop the client so it is rebuilt with the new key."""
         await super().configure(config)
         await self._close_client()
+        self._last_seen = {}
 
     async def _close_client(self) -> None:
         self._cache = None
@@ -515,11 +534,9 @@ class HomeyServicePlugin(ServicePlugin):
     async def test_connection(cls, config: dict[str, Any]) -> dict[str, Any] | None:
         """One device-list read with the typed (or stored) address and key."""
         host, key = _clean(cls.normalize_config(config))
-        if not _usable(host, key):
-            return {
-                "success": False,
-                "message": "Enter a valid hub address and API key.",
-            }
+        problem = _config_problem(host, key)
+        if problem:
+            return {"success": False, "message": problem}
         client = None
         try:
             client = HomeyClient(host, key)
@@ -531,10 +548,14 @@ class HomeyServicePlugin(ServicePlugin):
         finally:
             if client is not None:
                 await client.aclose()
-        return {
-            "success": True,
-            "message": f"Connected to Homey ({len(devices)} devices).",
-        }
+        switchable = sum(1 for d in devices if d.has_onoff)
+        if switchable == 0:
+            message = "Connected, but Homey has no devices that can be switched on and off."
+        elif switchable == 1:
+            message = "Connected. 1 device can be switched."
+        else:
+            message = f"Connected. {switchable} devices can be switched."
+        return {"success": True, "message": message}
 
     @classmethod
     async def scan_options_with_config(
@@ -544,8 +565,9 @@ class HomeyServicePlugin(ServicePlugin):
         if field_key != "devices":
             return None
         host, key = _clean(cls.normalize_config(config))
-        if not _usable(host, key):
-            return {"options": [], "error": "Enter the hub address and API key first."}
+        problem = _config_problem(host, key)
+        if problem:
+            return {"options": [], "error": problem}
         client = None
         try:
             client = HomeyClient(host, key)
@@ -569,7 +591,10 @@ class HomeyServicePlugin(ServicePlugin):
 
     @staticmethod
     def _item(
-        device_id: str, device: HomeyDevice | None, label: str | None = None
+        device_id: str,
+        device: HomeyDevice | None,
+        label: str | None = None,
+        group: str | None = None,
     ) -> dict:
         """One tile. Anything that cannot be switched is unavailable with no action."""
         usable = (
@@ -579,12 +604,12 @@ class HomeyServicePlugin(ServicePlugin):
             and device.on is not None
         )
         if device is not None:
-            label = device.name
+            label, group = device.name, device.zone
         state = ("on" if device.on else "off") if usable else "unavailable"
         return {
             "id": device_id,
-            "label": label or "Missing device",
-            "group": device.zone if device is not None else None,
+            "label": label or "Not found in Homey",
+            "group": group,
             "state": state,
             "action": (
                 {
@@ -626,11 +651,20 @@ class HomeyServicePlugin(ServicePlugin):
             client = await self._hub()
             by_id = {d.id: d for d in await client.list_devices()}
             items = [self._item(i, by_id.get(i)) for i in chosen]
+            seen = {
+                i: (d.name, d.zone) for i in chosen if (d := by_id.get(i)) is not None
+            }
         except Exception:  # noqa: BLE001 - keep the tiles on screen, say "Not responding"
-            items = [self._item(i, None, "Unknown device") for i in chosen]
+            seen = None
+            items = [
+                self._item(i, None, *self._last_seen.get(i, ("Unknown device", None)))
+                for i in chosen
+            ]
         # A failure is cached too, so a dead hub is asked once per window, not
         # once per open screen.
         if generation == self._generation:
+            if seen is not None:
+                self._last_seen = seen
             # Stamped when the read ended: a call that used up its deadline
             # must still hold for the full window.
             self._cache = (self._clock(), tuple(chosen), items)

@@ -502,6 +502,9 @@ def fake_client(monkeypatch):
     return FakeClient
 
 
+MSG_ENTER_HOST = "Enter the hub address, starting with http:// or https://."
+MSG_ENTER_KEY = "Enter the API key."
+
 GOOD = {"host": "http://hub.example", "api_key": KEY}
 
 
@@ -536,8 +539,12 @@ class TestContractShape:
         assert md.instance_identity is None
         assert md.display_schema["kind"] == "switch-grid"
         assert md.display_schema["poll_interval_ms"] == 15000
-        assert md.display_schema["unreachable_text"] == "Couldn't reach Homey"
-        assert md.display_schema["empty_text"] == "No devices chosen yet."
+        assert md.display_schema["unreachable_text"] == "Couldn't reach Homey."
+        assert (
+            md.display_schema["empty_text"]
+            == "No devices chosen yet. Pick them in Settings."
+        )
+        assert md.instance_label == "Homey switches"
         [action] = md.actions
         assert action.name == "set_onoff"
         assert action.params["device"].type == "string"
@@ -547,6 +554,11 @@ class TestContractShape:
         field = HomeyServicePlugin.metadata.instance_config_schema["devices"]
         assert field["type"] == "string"
         assert field["ui"]["component"] == "multi-select-scan"
+        assert field["required"] is True
+        assert (
+            field["description"]
+            == "Choose Scan, then pick the devices to show. Only these can be switched."
+        )
 
     def test_host_is_an_endpoint_key_and_api_key_a_secret_key(self):
         from app.plugins.utils.secrets import endpoint_keys, secret_keys
@@ -557,12 +569,26 @@ class TestContractShape:
         assert secret_keys(schema) == {"api_key"}
         assert schema["api_key"]["type"] == "password"
 
-    def test_api_key_description_names_both_scopes(self):
+    def test_api_key_description_has_no_scope_ids(self):
         text = HomeyServicePlugin.metadata.instance_config_schema["api_key"][
             "description"
         ]
-        assert "homey.device.readonly" in text
-        assert "homey.device.control" in text
+        assert (
+            text
+            == "In Homey: Settings \u2192 API keys. Allow it to view and control devices."
+        )
+        assert "homey." not in text
+
+    def test_readme_keeps_the_scope_ids(self):
+        readme = (PLUGIN_DIR / "README.md").read_text()
+        for scope in (
+            "homey.device.readonly",
+            "homey.device.control",
+            "homey.zone.readonly",
+        ):
+            assert scope in readme
+        assert "trust_env" not in readme
+        assert "trust_env" in (PLUGIN_DIR / "API_NOTES.md").read_text()
 
 
 class TestConfig:
@@ -577,8 +603,18 @@ class TestConfig:
     async def test_initialize_requires_host_and_key(self):
         instance = HomeyServicePlugin("homey-x", "Homey")
         await instance.configure({"host": "", "api_key": ""})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as info:
             await instance.initialize()
+        assert str(info.value) == (
+            "The hub address must start with http:// or https://."
+        )
+
+    async def test_initialize_without_a_key_says_so(self):
+        instance = HomeyServicePlugin("homey-x", "Homey")
+        await instance.configure({"host": "http://hub.example", "api_key": ""})
+        with pytest.raises(ValueError) as info:
+            await instance.initialize()
+        assert str(info.value) == "Enter the Homey API key."
 
     async def test_initialize_error_text_has_no_key(self):
         instance = HomeyServicePlugin("homey-x", "Homey")
@@ -791,6 +827,48 @@ class TestConnection:
         assert result["success"] is False
         assert fake_client.instances == []
 
+    @pytest.mark.parametrize(
+        "cfg,message",
+        [
+            ({"host": "", "api_key": ""}, MSG_ENTER_HOST),
+            ({"host": "ftp://x", "api_key": KEY}, MSG_ENTER_HOST),
+            ({"host": "http://hub.example", "api_key": ""}, MSG_ENTER_KEY),
+            ({"host": "http://hub.example", "api_key": "a b"}, MSG_ENTER_KEY),
+        ],
+    )
+    async def test_invalid_address_and_key_have_their_own_message(
+        self, fake_client, cfg, message
+    ):
+        assert await HomeyServicePlugin.test_connection(cfg) == {
+            "success": False,
+            "message": message,
+        }
+        scan = await HomeyServicePlugin.scan_options_with_config("devices", cfg)
+        assert scan == {"options": [], "error": message}
+        assert fake_client.instances == []
+
+    @pytest.mark.parametrize(
+        "switchable,message",
+        [
+            (0, "Connected, but Homey has no devices that can be switched on and off."),
+            (1, "Connected. 1 device can be switched."),
+            (3, "Connected. 3 devices can be switched."),
+        ],
+    )
+    async def test_success_counts_only_switchable_devices(
+        self, fake_client, monkeypatch, switchable, message
+    ):
+        devices = [
+            _homey_device(f"id-{n}", f"Lamp {n}") for n in range(switchable)
+        ] + [_homey_device("sensor", "Sensor", has_onoff=False, on=None)]
+        monkeypatch.setattr(
+            FakeClient, "__init__", _listing_init(devices), raising=True
+        )
+        assert await HomeyServicePlugin.test_connection(GOOD) == {
+            "success": True,
+            "message": message,
+        }
+
 
 def _failing_init(exc):
     def init(self, base_url, api_key, **kwargs):
@@ -919,6 +997,10 @@ async def live(fake_client):
     return make
 
 
+def fake_client_last(plugin):
+    return FakeClient.instances[-1]
+
+
 class TestFetch:
     async def test_chosen_devices_in_chosen_order_with_explicit_targets(self, live):
         plugin, _ = await live()
@@ -957,7 +1039,7 @@ class TestFetch:
             assert item["action"] is None
         assert sensor["label"] == "Sensor"
         assert lamp["label"] == "Lamp B"
-        assert missing["label"] == "Missing device"
+        assert missing["label"] == "Not found in Homey"
         assert missing["group"] is None
 
     async def test_device_with_unknown_on_state_is_unavailable(self, live):
@@ -979,6 +1061,53 @@ class TestFetch:
             i["state"] == "unavailable" and i["action"] is None for i in data["items"]
         )
         assert KEY not in json.dumps(data)
+
+    async def test_failed_read_keeps_last_good_label_and_group(self, live):
+        plugin, client = await live()
+        await plugin.fetch()
+        plugin._clock.now += 5
+        client.list_devices.side_effect = HomeyUnreachable()
+        lamp_b, lamp_a = (await plugin.fetch())["items"]
+        assert (lamp_b["label"], lamp_b["group"]) == ("Lamp B", "Room B")
+        assert (lamp_a["label"], lamp_a["group"]) == ("Lamp A", "Room A")
+        for item in (lamp_a, lamp_b):
+            assert item["state"] == "unavailable" and item["action"] is None
+
+    async def test_failed_read_with_no_good_read_ever_says_unknown_device(self, live):
+        plugin, client = await live()
+        client.list_devices.side_effect = HomeyUnreachable()
+        items = (await plugin.fetch())["items"]
+        assert [(i["label"], i["group"]) for i in items] == [
+            ("Unknown device", None)
+        ] * 2
+
+    async def test_configure_clears_the_last_good_labels(self, live):
+        plugin, client = await live()
+        await plugin.fetch()
+        await plugin.configure({**GOOD, "devices": f"{D2},{D1}"})
+        plugin._clock = Clock()
+        await plugin.initialize()
+        fake_client_last(plugin).list_devices.side_effect = HomeyUnreachable()
+        assert {i["label"] for i in (await plugin.fetch())["items"]} == {
+            "Unknown device"
+        }
+
+    async def test_last_good_labels_hold_only_chosen_ids_and_text(self, live):
+        plugin, client = await live(devices_cfg=D1)
+        await plugin.fetch()
+        assert plugin._last_seen == {D1: ("Lamp A", "Room A")}
+        plugin._clock.now += 5
+        await plugin.configure({**GOOD, "devices": D2})
+        assert plugin._last_seen == {}
+
+    async def test_device_deleted_in_homey_is_not_found_not_last_label(self, live):
+        plugin, client = await live(devices_cfg=D1)
+        await plugin.fetch()
+        plugin._clock.now += 5
+        client.list_devices.return_value = []
+        [item] = (await plugin.fetch())["items"]
+        assert item["label"] == "Not found in Homey"
+        assert item["group"] is None
 
     async def test_duplicate_chosen_ids_make_one_tile(self, live):
         plugin, _ = await live(devices_cfg=f"{D1}, {D1},")
