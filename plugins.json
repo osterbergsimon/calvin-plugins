@@ -10,6 +10,14 @@
       "type": "service"
     },
     {
+      "id": "homey",
+      "name": "Homey",
+      "path": "homey",
+      "description": "On/off tiles for chosen Homey Pro devices.",
+      "version": "0.1.0",
+      "type": "service"
+    },
+    {
       "id": "immich",
       "name": "Immich",
       "path": "immich",

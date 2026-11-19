@@ -115,6 +115,7 @@ SENTENCE_CASE_ALLOWLIST = frozenset(
         "Chromecast",
         "Gmail",
         "Google",
+        "Homey",
         "ID",
         "Immich",
         "Lychee",
