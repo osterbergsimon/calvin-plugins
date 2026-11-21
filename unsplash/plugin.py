@@ -41,6 +41,8 @@ class UnsplashImagePlugin(ImagePlugin):
                 "default": "",
                 "ui": {
                     "component": "password",
+                    # Calls a fixed vendor address; there is no address field to guard.
+                    "fixed_endpoint": True,
                     "placeholder": "Enter your Unsplash API key",
                     "help_link": "https://unsplash.com/developers",
                     "validation": {"required": True},

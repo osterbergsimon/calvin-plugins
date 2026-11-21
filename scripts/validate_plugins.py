@@ -394,6 +394,94 @@ def validate_field(
             record.errors.append(f"{where}.{flag} must be a boolean")
 
 
+# Mirrors backend app.plugins.utils.secrets.endpoint_keys (this repo cannot import the
+# backend): Calvin reuses a stored secret on test/scan only while these fields are
+# unchanged, so a field it does not recognise as an address gets no such check.
+_ENDPOINT_KEY_RE = re.compile(r"(url|uri|host|server|endpoint|domain|port)", re.I)
+# Heuristic only: names that usually hold an address but that the regex above misses.
+_ADDRESS_LIKE_KEY_RE = re.compile(r"(^address$|(^|_)(ip|hub|base)(_|$))", re.I)
+
+
+def _ui_dict(field_node: ast.Dict) -> ast.Dict | None:
+    ui = dict_value(field_node, "ui")
+    return ui if isinstance(ui, ast.Dict) else None
+
+
+def _ui_value(field_node: ast.Dict, key: str) -> ast.AST | None:
+    ui = _ui_dict(field_node)
+    return dict_value(ui, key) if ui is not None else None
+
+
+def _is_secret_field(field_node: ast.Dict) -> bool:
+    return (
+        literal_string(dict_value(field_node, "type")) == "password"
+        or literal_string(_ui_value(field_node, "component")) == "password"
+    )
+
+
+def _is_recognised_endpoint(key: str, field_node: ast.Dict) -> bool:
+    if _ENDPOINT_KEY_RE.search(key):
+        return True
+    if literal_string(dict_value(field_node, "type")) == "url":
+        return True
+    validation = _ui_value(field_node, "validation")
+    if (
+        isinstance(validation, ast.Dict)
+        and literal_string(dict_value(validation, "type")) == "url"
+    ):
+        return True
+    return literal_bool(_ui_value(field_node, "endpoint")) is True
+
+
+def _is_address_like(key: str) -> bool:
+    return "email" not in key.lower() and bool(_ADDRESS_LIKE_KEY_RE.search(key))
+
+
+def validate_secret_endpoint(record: MetadataRecord) -> None:
+    """A plugin with a secret must name the field that says where the secret is sent."""
+    fields: list[tuple[str, str, ast.Dict]] = []
+    for schema_name, schema in (
+        ("common_config_schema", record.common_config_schema),
+        ("instance_config_schema", record.instance_config_schema),
+    ):
+        if schema is None:
+            continue
+        for key_node, value_node in zip(schema.keys, schema.values):
+            key = literal_string(key_node)
+            if key is not None and isinstance(value_node, ast.Dict):
+                fields.append((schema_name, key, value_node))
+
+    secrets = [f for f in fields if _is_secret_field(f[2])]
+    if not secrets:
+        return
+
+    has_endpoint = False
+    flagged = False
+    for schema_name, key, node in fields:
+        if _is_recognised_endpoint(key, node):
+            has_endpoint = True
+        elif _is_address_like(key):
+            flagged = True
+            record.errors.append(
+                f"{schema_name}.{key} looks like an address but the host will not "
+                'treat it as one; mark it "ui": {"endpoint": True} so a changed '
+                "address cannot reuse the stored secret"
+            )
+    if has_endpoint or flagged:
+        return
+    if any(
+        literal_bool(_ui_value(node, "fixed_endpoint")) is True
+        for _, _, node in secrets
+    ):
+        return
+    schema_name, key, _ = secrets[0]
+    record.errors.append(
+        f"{schema_name}.{key} is a secret but the plugin has no address field; add one "
+        'marked "ui": {"endpoint": True}, or if it calls a fixed address mark the '
+        'secret "ui": {"fixed_endpoint": True}'
+    )
+
+
 def validate_actions(record: MetadataRecord) -> None:
     if record.ui_actions is None:
         return
@@ -482,6 +570,7 @@ def validate_record(record: MetadataRecord) -> None:
     validate_schema(record, "instance_config_schema", record.instance_config_schema)
     validate_display(record, "display_schema", record.display_schema)
     validate_display(record, "statusbar_schema", record.statusbar_schema)
+    validate_secret_endpoint(record)
     validate_actions(record)
     validate_browser_origins(record)
 
