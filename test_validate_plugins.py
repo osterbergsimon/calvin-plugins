@@ -748,7 +748,8 @@ def test_secret_with_other_address_like_names_fails(tmp_path, key):
     errors = _validate_schema_fields(tmp_path, _secret_field(), _address_field(key))
 
     assert len(errors) == 1
-    assert key in errors[0]
+    assert f"instance_config_schema.{key} " in errors[0]
+    assert '"ui": {"endpoint": True}' in errors[0]
 
 
 def test_secret_with_no_endpoint_and_no_fixed_marker_fails(tmp_path):
@@ -768,12 +769,83 @@ def test_secret_with_fixed_endpoint_marker_passes(tmp_path):
 
 def test_email_address_is_not_flagged(tmp_path):
     errors = _validate_schema_fields(
-        tmp_path,
-        _secret_field(ui_extra=', "fixed_endpoint": True'),
-        _address_field("email_address"),
+        tmp_path, _secret_field(), _address_field("email_address")
+    )
+
+    # Not flagged as an unmarked address; only the missing-address error remains.
+    assert len(errors) == 1
+    assert "looks like an address" not in errors[0]
+    assert "fixed_endpoint" in errors[0]
+
+
+@pytest.mark.parametrize("key", ["bridge_address", "IP", "Hub"])
+def test_address_like_matching_is_word_part_and_case_insensitive(tmp_path, key):
+    errors = _validate_schema_fields(tmp_path, _secret_field(), _address_field(key))
+
+    assert len(errors) == 1
+    assert "looks like an address" in errors[0]
+
+
+@pytest.mark.parametrize(
+    "ui",
+    [
+        '{"validation": {"type": "url"}}',
+        '{"endpoint": True}',
+    ],
+)
+def test_ui_markers_recognise_oddly_named_endpoint(tmp_path, ui):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(), _address_field("address", ui)
     )
 
     assert errors == []
+
+
+def test_url_typed_field_is_recognised_endpoint(tmp_path):
+    field = '"address": {"type": "url", "label": "Server address"}'
+
+    assert _validate_schema_fields(tmp_path, _secret_field(), field) == []
+
+
+def test_secret_detected_by_password_component_alone(tmp_path):
+    secret = (
+        '"token": {"type": "string", "label": "Access token", '
+        '"ui": {"component": "password"}}'
+    )
+
+    errors = _validate_schema_fields(tmp_path, secret)
+
+    assert len(errors) == 1
+    assert "fixed_endpoint" in errors[0]
+
+
+def test_fixed_endpoint_false_does_not_satisfy_rule(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(ui_extra=', "fixed_endpoint": False')
+    )
+
+    assert len(errors) == 1
+
+
+def test_secret_name_is_not_its_own_endpoint(tmp_path):
+    errors = _validate_schema_fields(tmp_path, _secret_field("server_password"))
+
+    assert len(errors) == 1
+    assert "fixed_endpoint" in errors[0]
+
+
+def test_secret_in_common_schema_is_checked(tmp_path):
+    plugin_dir = tmp_path / "demo-plugin"
+    source = VALID_PLUGIN_PY.replace(
+        "instance_config_schema={},",
+        f"instance_config_schema={{}}, common_config_schema={{{_secret_field()}}},",
+    )
+    write_valid_plugin(plugin_dir, source)
+
+    errors = _mod.validate_plugins([plugin_dir])
+
+    assert len(errors) == 1
+    assert "common_config_schema.token" in errors[0]
 
 
 def test_plugin_without_secret_is_untouched(tmp_path):

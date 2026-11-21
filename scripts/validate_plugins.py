@@ -399,7 +399,8 @@ def validate_field(
 # unchanged, so a field it does not recognise as an address gets no such check.
 _ENDPOINT_KEY_RE = re.compile(r"(url|uri|host|server|endpoint|domain|port)", re.I)
 # Heuristic only: names that usually hold an address but that the regex above misses.
-_ADDRESS_LIKE_KEY_RE = re.compile(r"(^address$|(^|_)(ip|hub|base)(_|$))", re.I)
+# Matched as whole word parts, so base_dir is flagged but database is not.
+_ADDRESS_LIKE_KEY_RE = re.compile(r"((^|_)(address|ip|hub|base)(_|$))", re.I)
 
 
 def _ui_dict(field_node: ast.Dict) -> ast.Dict | None:
@@ -458,6 +459,10 @@ def validate_secret_endpoint(record: MetadataRecord) -> None:
     has_endpoint = False
     flagged = False
     for schema_name, key, node in fields:
+        # Stricter than the host: a secret is never its own address, so a name like
+        # server_password neither satisfies nor trips the rule.
+        if _is_secret_field(node):
+            continue
         if _is_recognised_endpoint(key, node):
             has_endpoint = True
         elif _is_address_like(key):
@@ -476,7 +481,8 @@ def validate_secret_endpoint(record: MetadataRecord) -> None:
         return
     schema_name, key, _ = secrets[0]
     record.errors.append(
-        f"{schema_name}.{key} is a secret but the plugin has no address field; add one "
+        f"{schema_name}.{key} is a secret but no other field is recognised as its "
+        "address; add one "
         'marked "ui": {"endpoint": True}, or if it calls a fixed address mark the '
         'secret "ui": {"fixed_endpoint": True}'
     )

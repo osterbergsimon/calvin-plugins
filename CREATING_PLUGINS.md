@@ -91,8 +91,7 @@ card-grid display.
    scan only while the fields saying *where* it is sent are unchanged. The host
    recognises a field named like url/uri/host/server/endpoint/domain/port, a
    `url` type, or `"ui": {"endpoint": True}`. If your address field is named
-   anything else (`address`, `ip`, `hub`, `base`), mark it `"ui": {"endpoint":
-   True}`. A plugin that always calls one fixed address marks its secret
+   anything else (`address`, `ip`, `hub`, `base`), mark it `"ui": {"endpoint": True}`. A plugin that always calls one fixed address marks its secret
    `"ui": {"fixed_endpoint": True}` instead. The validator enforces both; see
    "config field shape" in Calvin's PLUGIN_INTERFACE.md.
 4. **Validation.** Before creating or updating an instance the host awaits
