@@ -86,6 +86,15 @@ card-grid display.
    str, `integer` → int, `number` → float, `boolean` → bool) and stores it in
    `self.config`. Read `self.config["key"]`; add small `@property` accessors
    for trimming (see mealie).
+
+   **Secrets and addresses.** A stored `password` field is reused on test and
+   scan only while the fields saying *where* it is sent are unchanged. The host
+   recognises a field named like url/uri/host/server/endpoint/domain/port, a
+   `url` type, or `"ui": {"endpoint": True}`. If your address field is named
+   anything else (`address`, `ip`, `hub`, `base`), mark it
+   `"ui": {"endpoint": True}`. A plugin that always calls one fixed address
+   marks its secret `"ui": {"fixed_endpoint": True}` instead. The validator enforces both; see
+   "config field shape" in Calvin's PLUGIN_INTERFACE.md.
 4. **Validation.** Before creating or updating an instance the host awaits
    `YourPlugin.validate_config(config)` (an async **classmethod**). The
    default checks that every field with `ui.validation.required` is non-empty.

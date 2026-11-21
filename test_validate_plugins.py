@@ -690,3 +690,165 @@ def test_icon_list_matches_host_icon_map():
         f"Missing from the validator: {sorted(host - mirror)}. "
         f"Missing from the host: {sorted(mirror - host)}."
     )
+
+
+# --- secret-bearing plugins must name the address the secret is sent to ---------------
+
+
+def _secret_field(key: str = "token", ui_extra: str = "") -> str:
+    return (
+        f'"{key}": {{"type": "password", "label": "Access token", '
+        f'"ui": {{"component": "password"{ui_extra}}}}}'
+    )
+
+
+def _address_field(key: str, ui: str = "") -> str:
+    ui_part = f', "ui": {ui}' if ui else ""
+    return f'"{key}": {{"type": "string", "label": "Server address"{ui_part}}}'
+
+
+def _validate_schema_fields(tmp_path, *fields: str) -> list[str]:
+    plugin_dir = tmp_path / "demo-plugin"
+    write_valid_plugin(plugin_dir, _plugin_with_schema(", ".join(fields)))
+    return _mod.validate_plugins([plugin_dir])
+
+
+def test_secret_with_unmarked_address_field_fails(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(), _address_field("address")
+    )
+
+    assert len(errors) == 1
+    assert "address" in errors[0]
+    assert '"ui": {"endpoint": True}' in errors[0]
+
+
+def test_secret_with_marked_address_field_passes(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path,
+        _secret_field(),
+        _address_field("address", '{"endpoint": True}'),
+    )
+
+    assert errors == []
+
+
+def test_secret_with_url_named_field_passes(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(), _address_field("base_url")
+    )
+
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "key", ["ip", "ip_address", "hub_ip", "hub", "base", "api_base"]
+)
+def test_secret_with_other_address_like_names_fails(tmp_path, key):
+    errors = _validate_schema_fields(tmp_path, _secret_field(), _address_field(key))
+
+    assert len(errors) == 1
+    assert f"instance_config_schema.{key} " in errors[0]
+    assert '"ui": {"endpoint": True}' in errors[0]
+
+
+def test_secret_with_no_endpoint_and_no_fixed_marker_fails(tmp_path):
+    errors = _validate_schema_fields(tmp_path, _secret_field())
+
+    assert len(errors) == 1
+    assert "fixed_endpoint" in errors[0]
+
+
+def test_secret_with_fixed_endpoint_marker_passes(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(ui_extra=', "fixed_endpoint": True')
+    )
+
+    assert errors == []
+
+
+def test_email_address_is_not_flagged(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(), _address_field("email_address")
+    )
+
+    # Not flagged as an unmarked address; only the missing-address error remains.
+    assert len(errors) == 1
+    assert "looks like an address" not in errors[0]
+    assert "fixed_endpoint" in errors[0]
+
+
+@pytest.mark.parametrize("key", ["bridge_address", "IP", "Hub"])
+def test_address_like_matching_is_word_part_and_case_insensitive(tmp_path, key):
+    errors = _validate_schema_fields(tmp_path, _secret_field(), _address_field(key))
+
+    assert len(errors) == 1
+    assert "looks like an address" in errors[0]
+
+
+@pytest.mark.parametrize(
+    "ui",
+    [
+        '{"validation": {"type": "url"}}',
+        '{"endpoint": True}',
+    ],
+)
+def test_ui_markers_recognise_oddly_named_endpoint(tmp_path, ui):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(), _address_field("address", ui)
+    )
+
+    assert errors == []
+
+
+def test_url_typed_field_is_recognised_endpoint(tmp_path):
+    field = '"address": {"type": "url", "label": "Server address"}'
+
+    assert _validate_schema_fields(tmp_path, _secret_field(), field) == []
+
+
+def test_secret_detected_by_password_component_alone(tmp_path):
+    secret = (
+        '"token": {"type": "string", "label": "Access token", '
+        '"ui": {"component": "password"}}'
+    )
+
+    errors = _validate_schema_fields(tmp_path, secret)
+
+    assert len(errors) == 1
+    assert "fixed_endpoint" in errors[0]
+
+
+def test_fixed_endpoint_false_does_not_satisfy_rule(tmp_path):
+    errors = _validate_schema_fields(
+        tmp_path, _secret_field(ui_extra=', "fixed_endpoint": False')
+    )
+
+    assert len(errors) == 1
+
+
+def test_secret_name_is_not_its_own_endpoint(tmp_path):
+    errors = _validate_schema_fields(tmp_path, _secret_field("server_password"))
+
+    assert len(errors) == 1
+    assert "fixed_endpoint" in errors[0]
+
+
+def test_secret_in_common_schema_is_checked(tmp_path):
+    plugin_dir = tmp_path / "demo-plugin"
+    source = VALID_PLUGIN_PY.replace(
+        "instance_config_schema={},",
+        f"instance_config_schema={{}}, common_config_schema={{{_secret_field()}}},",
+    )
+    write_valid_plugin(plugin_dir, source)
+
+    errors = _mod.validate_plugins([plugin_dir])
+
+    assert len(errors) == 1
+    assert "common_config_schema.token" in errors[0]
+
+
+def test_plugin_without_secret_is_untouched(tmp_path):
+    errors = _validate_schema_fields(tmp_path, _address_field("address"))
+
+    assert errors == []
